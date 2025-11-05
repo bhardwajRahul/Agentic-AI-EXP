@@ -11,12 +11,13 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.chat_models import init_chat_model
+from langchain_google_genai import ChatGoogleGenerativeAI
 import asyncio
 import logging
 import json
+from datetime import datetime
 
 load_dotenv()
-key = os.getenv("openrouter_api_key")
 
 logging.basicConfig(
     level=logging.INFO,
@@ -43,7 +44,6 @@ class State(TypedDict):
 
 api_key = os.getenv("OPENROUTER_API_KEY")
 base_url = "https://openrouter.ai/api/v1"
-
 memory = MemorySaver()
 builder = StateGraph(State)
 
@@ -55,7 +55,6 @@ def build_llm_with_tools(tools):
         openai_api_key=api_key,
         openai_api_base=base_url,
     )
-    logger.info("LLM binding successful")
     return llm.bind_tools(tools)
 
 
@@ -63,9 +62,12 @@ def agent_node_factory(llm_with_tools):
     def agent_node(state: State):
         request_counter["count"] += 1
         request_num = request_counter["count"]
+
         logger.info("=" * 80)
         logger.info(f"🔄 LLM REQUEST #{request_num}")
         logger.info("=" * 80)
+
+        logger.info(f"📨 Messages in conversation: {len(state['messages'])}")
 
         last_message = state["messages"][-1]
         if hasattr(last_message, "content"):
@@ -78,6 +80,9 @@ def agent_node_factory(llm_with_tools):
             logger.info(f"📝 Content preview: {content_preview}")
 
         msg = llm_with_tools.invoke(state["messages"])
+        logger.info(f"✅ LLM RESPONSE RECEIVED: {msg}")
+        logger.info(f"📊 Response type: {msg.__class__.__name__}")
+
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             logger.info(f"🔧 Tool calls made: {len(msg.tool_calls)}")
             for i, tool_call in enumerate(msg.tool_calls, 1):
@@ -96,7 +101,6 @@ def agent_node_factory(llm_with_tools):
             )
             logger.info(f"📄 Response content: {content_preview}")
 
-        # Log token usage if available
         if hasattr(msg, "usage_metadata") and msg.usage_metadata:
             usage = msg.usage_metadata
             logger.info(f"📈 Token usage:")
@@ -105,9 +109,14 @@ def agent_node_factory(llm_with_tools):
             logger.info(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
 
         logger.info("=" * 80)
+
         return {"messages": [msg]}
 
     return agent_node
+
+
+def clear_memory():
+    return MemorySaver()
 
 
 def build_graph(tools, memory):
@@ -125,22 +134,49 @@ def build_graph(tools, memory):
 
 
 async def main():
+    start_time = datetime.now()
+    logger.info("🚀 Starting Gmail Agent")
+    logger.info("=" * 80)
+
     tools = await client.get_tools()
-    logger.info(f"Tools loaded: {len(tools)} tools")
-    logger.info(f"Tool names: {[t.name for t in tools]}")
-    graph = build_graph(tools, memory)
-    config = {"configurable": {"thread_id": "buy_thread"}}
+    logger.info(f"✅ Tools loaded: {len(tools)} tools")
+
+    graph = build_graph(tools, memory)  # before this clear memory function will work
+    config = {"configurable": {"thread_id": "gmail_thread_001"}}
+
+    user_query = "What are the recent emails I have received in the last 7 days?"
+    logger.info(f"👤 User Query: {user_query}")
+    logger.info("=" * 80)
+
     state = await graph.ainvoke(
         {
             "messages": [
                 {
                     "role": "user",
-                    "content": "Use the get_unread_emails_tool to retrieve my recent emails. What are the recent mails I have received last 7 days?",
-                },
+                    "content": user_query,
+                }
             ]
         },
         config=config,
     )
+
+    logger.info("=" * 80)
+    logger.info("🎯 EXECUTION SUMMARY")
+    logger.info("=" * 80)
+    logger.info(f"✅ Status: Success")
+    logger.info(f"📊 Total LLM requests: {request_counter['count']}")
+    logger.info(f"💬 Total messages in conversation: {len(state['messages'])}")
+
+    logger.info(f"📝 Conversation flow:")
+    for i, msg in enumerate(state["messages"], 1):
+        msg_type = msg.__class__.__name__
+        logger.info(f"   {i}. {msg_type}")
+
+    end_time = datetime.now()
+    execution_time = (end_time - start_time).total_seconds()
+    logger.info(f"⏱️  Execution time: {execution_time:.2f} seconds")
+    logger.info("=" * 80)
+
     final_response = state["messages"][-1]
     logger.info("📤 FINAL RESPONSE:")
     logger.info("=" * 80)
@@ -148,6 +184,9 @@ async def main():
         print(f"\n{final_response.content}\n")
     else:
         print(f"\n{final_response}\n")
+
+    logger.info("=" * 80)
+    logger.info("✅ Gmail Agent execution completed")
 
 
 if __name__ == "__main__":
