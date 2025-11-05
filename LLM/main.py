@@ -11,7 +11,6 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain.chat_models import init_chat_model
-from langchain_google_genai import ChatGoogleGenerativeAI
 import asyncio
 import logging
 import json
@@ -136,7 +135,7 @@ async def main():
             "messages": [
                 {
                     "role": "user",
-                    "content": "Use the get_unread_emails_tool to retrieve my recent emails. What are the recent mails I have received last 7 days?",
+                    "content": "hey as i have send bhuwan a message that i will be meeting him tomorrow check if he have replied back if so send him that i will meet him morining 10 am ",
                 },
             ]
         },
