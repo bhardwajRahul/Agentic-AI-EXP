@@ -1,4 +1,4 @@
-from gmail_tools import mcp
+from tools.gmail_tools import mcp
 
 
 if __name__ == "__main__":
