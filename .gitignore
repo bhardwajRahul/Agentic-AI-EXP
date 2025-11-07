@@ -1,4 +1,6 @@
-/cred
+**/cred/
 .venv/
 __pycache__/
 .env
+**/client_secret*.json
+**/token.json
