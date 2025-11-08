@@ -1,7 +1,5 @@
 from dotenv import load_dotenv
 import os
-import matplotlib.pyplot as plt
-import networkx as nx
 from langgraph.graph import StateGraph, START, END
 from langchain_openai import ChatOpenAI
 from typing import Annotated
@@ -10,13 +8,20 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 from langchain_mcp_adapters.client import MultiServerMCPClient
-from langgraph.checkpoint.sqlite import SqliteSaver
-from langchain.chat_models import init_chat_model
+from langgraph.store.postgres import PostgresStore
+from langgraph.checkpoint.postgres import PostgresSaver
+import psycopg
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+import aiosqlite
+from pathlib import Path
+from langchain_core.messages import trim_messages
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+
+# from langchain.chat_models import init_chat_model
 from langgraph.types import Command
 import asyncio
 import logging
 import json
-import sqlite3
 from datetime import datetime
 
 load_dotenv()
@@ -50,10 +55,9 @@ class State(TypedDict):
     messages: Annotated[list, add_messages]
 
 
+DB_PATH = Path("D:/Agentic AI/data/memory.db")
 api_key = os.getenv("OPENROUTER_API_KEY")
 base_url = "https://openrouter.ai/api/v1"
-
-memory = MemorySaver()
 
 
 def build_llm_with_tools(tools):
@@ -64,6 +68,29 @@ def build_llm_with_tools(tools):
         openai_api_base=base_url,
     )
     return llm.bind_tools(tools)
+
+
+def strip_message_metadata(message):
+    if isinstance(message, AIMessage):
+        return AIMessage(
+            content=message.content,
+            tool_calls=message.tool_calls if hasattr(message, "tool_calls") else [],
+        )
+    elif isinstance(message, HumanMessage):
+        return HumanMessage(content=message.content)
+    elif isinstance(message, ToolMessage):
+        return ToolMessage(
+            content=message.content,
+            tool_call_id=message.tool_call_id,
+            name=message.name if hasattr(message, "name") else None,
+        )
+    else:
+        return message
+
+
+def clean_messages(messages):
+    """Clean all messages in the list"""
+    return [strip_message_metadata(msg) for msg in messages]
 
 
 def agent_node_factory(llm_with_tools):
@@ -77,17 +104,29 @@ def agent_node_factory(llm_with_tools):
 
         logger.info(f"📨 Messages in conversation: {len(state['messages'])}")
 
-        last_message = state["messages"][-1]
-        if hasattr(last_message, "content"):
-            logger.info(f"💬 Last message type: {last_message.__class__.__name__}")
+        last_messages = trim_messages(
+            state["messages"],
+            max_tokens=2000,
+            strategy="last",
+            token_counter=llm_with_tools,
+            include_system=True,
+            start_on="human",
+        )
+        logger.info("=" * 80)
+        logger.info(f"💬 Last message type: {last_messages}")
+        if hasattr(last_messages, "content"):
+            logger.info(f"💬 Last message type: {last_messages.__class__.__name__}")
             content_preview = (
-                str(last_message.content)[:200] + "..."
-                if len(str(last_message.content)) > 200
-                else str(last_message.content)
+                str(last_messages.content)[:200] + "..."
+                if len(str(last_messages.content)) > 200
+                else str(last_messages.content)
             )
             logger.info(f"📝 Content preview: {content_preview}")
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + state["messages"]
+        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + last_messages
+
+        logger.info("=" * 80)
+
         msg = llm_with_tools.invoke(messages)
         logger.info(f"✅ LLM RESPONSE RECEIVED: {msg}")
         logger.info(f"📊 Response type: {msg.__class__.__name__}")
@@ -102,7 +141,7 @@ def agent_node_factory(llm_with_tools):
                 )
                 logger.info(f"      ID: {tool_call.get('id', 'N/A')}")
         else:
-            logger.info(f"💭 No tool calls - Direct response")
+            logger.info("💭 No tool calls - Direct response")
 
         if hasattr(msg, "content") and msg.content:
             content_preview = (
@@ -112,7 +151,7 @@ def agent_node_factory(llm_with_tools):
 
         if hasattr(msg, "usage_metadata") and msg.usage_metadata:
             usage = msg.usage_metadata
-            logger.info(f"📈 Token usage:")
+            logger.info("📈 Token usage:")
             logger.info(f"   Input tokens: {usage.get('input_tokens', 'N/A')}")
             logger.info(f"   Output tokens: {usage.get('output_tokens', 'N/A')}")
             logger.info(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
@@ -124,9 +163,10 @@ def agent_node_factory(llm_with_tools):
     return agent_node
 
 
-def build_graph(tools, memory):
+def build_graph(tools, checkpointer):
     llm_with_tools = build_llm_with_tools(tools)
     agent_node = agent_node_factory(llm_with_tools)
+
     builder = StateGraph(State)
     builder.add_node("Agent", agent_node)
     tool_node = ToolNode(tools=tools)
@@ -134,8 +174,9 @@ def build_graph(tools, memory):
     builder.add_edge(START, "Agent")
     builder.add_conditional_edges("Agent", tools_condition)
     builder.add_edge("tools", "Agent")
-    builder.add_edge("Agent", END)
-    return builder.compile(checkpointer=memory)
+
+    graph = builder.compile(checkpointer=checkpointer)
+    return graph
 
 
 async def main():
@@ -146,47 +187,49 @@ async def main():
     tools = await client.get_tools()
     logger.info(f"✅ Tools loaded: {len(tools)} tools")
 
-    graph = build_graph(tools, memory)
-    config = {"configurable": {"thread_id": "gmail_thread_001"}}
+    async with aiosqlite.connect(str(DB_PATH)) as conn:
+        checkpointer = AsyncSqliteSaver(conn)
+        graph = build_graph(tools, checkpointer)
+        config = {"configurable": {"thread_id": "gmail_thread_001"}}
 
-    while True:
-        user_query = input("You: ").strip()
+        while True:
+            user_query = input("You: ").strip()
 
-        if user_query.lower() in ["exit", "quit", "bye"]:
-            logger.info("👋 User ended conversation")
-            break
+            if user_query.lower() in ["exit", "quit", "bye"]:
+                logger.info("👋 User ended conversation")
+                break
 
-        if not user_query:
-            continue
+            if not user_query:
+                continue
 
-        logger.info(f"👤 User Query: {user_query}")
-        logger.info("=" * 80)
+            logger.info(f"👤 User Query: {user_query}")
+            logger.info("=" * 80)
 
-        state = await graph.ainvoke(
-            {
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": user_query,
-                    }
-                ]
-            },
-            config=config,
-        )
-        if "__interrupt__" in state:
-            prompt = state["__interrupt__"]
-            print(f"🟡 Agent: {prompt}")
-            user_response = input("🧍 Your answer: ")
-            state = graph.invoke(Command(resume=user_response), config=config)
+            state = await graph.ainvoke(
+                {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "content": user_query,
+                        }
+                    ]
+                },
+                config=config,
+            )
+            if "__interrupt__" in state:
+                prompt = state["__interrupt__"]
+                print(f"🟡 Agent: {prompt}")
+                user_response = input("🧍 Your answer: ")
+                state = graph.invoke(Command(resume=user_response), config=config)
 
     logger.info("=" * 80)
     logger.info("🎯 EXECUTION SUMMARY")
     logger.info("=" * 80)
-    logger.info(f"✅ Status: Success")
+    logger.info("✅ Status: Success")
     logger.info(f"📊 Total LLM requests: {request_counter['count']}")
     logger.info(f"💬 Total messages in conversation: {len(state['messages'])}")
 
-    logger.info(f"📝 Conversation flow:")
+    logger.info("📝 Conversation flow:")
     for i, msg in enumerate(state["messages"], 1):
         msg_type = msg.__class__.__name__
         logger.info(f"   {i}. {msg_type}")
