@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
-from services.gmail_service import GmailService
+from services.mail.gmail_service import GmailService
 
 mcp = FastMCP(
     name="Gmail Assistant",
