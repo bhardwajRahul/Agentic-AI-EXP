@@ -1,7 +1,24 @@
+import asyncio
+import base64
+import logging
+import sys
+import webbrowser
+from base64 import urlsafe_b64decode
+from datetime import datetime, timedelta
+from email import message_from_bytes
+from email.header import decode_header
+from email.message import EmailMessage
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
-from services.mail.gmail_service import GmailService
+from auth.service_decoder import get_google_service
+
+sys.path.append(str(Path(__file__).parent.parent))
+
+from googleapiclient.errors import HttpError
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 mcp = FastMCP(
     name="Gmail Assistant",
@@ -10,9 +27,38 @@ mcp = FastMCP(
     stateless_http=True,
 )
 
-BASE_DIR = Path(__file__).parent.parent
-GMAIL_CRED_PATH = BASE_DIR / "cred" / "client_secret_gmail.json"
-GMAIL_TOKEN_PATH = BASE_DIR / "cred" / "gmail_token.json"
+
+# auth
+def get_service():
+    """Get Gmail service using shared auth"""
+    base_dir = Path(__file__).parent.parent
+    token_path = str(base_dir / "cred" / "token.json")
+    creds_path = str(base_dir / "cred" / "setup_cred.json")
+
+    return get_google_service(
+        service_type="gmail",
+        scope_key="gmail",
+        token_path=token_path,
+        creds_path=creds_path,
+    )
+
+
+def decode_mime_header(header: str) -> str:
+    """Helper function to decode encoded email headers"""
+    decoded_parts = decode_header(header)
+    decoded_string = ""
+    for part, encoding in decoded_parts:
+        if isinstance(part, bytes):
+            decoded_string += part.decode(encoding or "utf-8")
+        else:
+            decoded_string += part
+    return decoded_string
+
+
+async def get_user_email(service) -> str:
+    """Get the authenticated user's email address"""
+    profile = await asyncio.to_thread(service.users().getProfile(userId="me").execute)
+    return profile.get("emailAddress", "")
 
 
 @mcp.tool()
@@ -58,13 +104,28 @@ async def send_email_tool(recipient_id: str, subject: str, message: str):
         "required": ["recipient_id", "subject", "message"]
     }
     """
+    try:
+        service = get_service()
+        user_email = await get_user_email(service)
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    send_response = await gmail_service.send_email(recipient_id, subject, message)
-    return send_response
+        message_obj = EmailMessage()
+        message_obj.set_content(message)
+        message_obj["To"] = recipient_id
+        message_obj["From"] = user_email
+        message_obj["Subject"] = subject
+
+        encoded_message = base64.urlsafe_b64encode(message_obj.as_bytes()).decode()
+        create_message = {"raw": encoded_message}
+
+        send_message = await asyncio.to_thread(
+            service.users().messages().send(userId="me", body=create_message).execute
+        )
+
+        logger.info(f"Message sent: {send_message['id']}")
+        return {"status": "success", "message_id": send_message["id"]}
+    except Exception as error:
+        logger.error(f"Send email error: {str(error)}")
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
@@ -83,17 +144,17 @@ async def open_email_tool(email_id: str):
         "required": ["email_id"]
     }
     """
-
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    email_content = await gmail_service.open_email(email_id)
-    return email_content
+    try:
+        url = f"https://mail.google.com/#all/{email_id}"
+        webbrowser.open(url, new=0, autoraise=True)
+        return {"status": "success", "message": "Email opened in browser successfully."}
+    except Exception as error:
+        logger.error(f"Open email error: {str(error)}")
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
-async def get_unread_emails_tool(date=10):
+async def get_unread_emails_tool(date=10, max_results=20):
     """
     description="Fetch unread Gmail emails from the last 'n' days."
 
@@ -108,16 +169,63 @@ async def get_unread_emails_tool(date=10):
         "required": []
     }
     """
-    # Convert string to int if needed (some LLMs pass strings)
-    if isinstance(date, str):
-        date = int(date)
+    try:
+        service = get_service()
+        after_date = (datetime.now() - timedelta(days=date)).strftime("%Y/%m/%d")
+        query = f"in:inbox is:unread category:primary after:{after_date}"
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    unread_emails = await gmail_service.get_unread_emails(date=date)
-    return unread_emails
+        response = await asyncio.to_thread(
+            service.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=max_results)
+            .execute
+        )
+
+        messages = []
+        if "messages" in response:
+            for msg in response["messages"]:
+                email_id = msg["id"]
+
+                full_msg = await asyncio.to_thread(
+                    service.users()
+                    .messages()
+                    .get(
+                        userId="me",
+                        id=email_id,
+                        format="metadata",
+                        metadataHeaders=["Subject", "From", "Date", "To"],
+                    )
+                    .execute
+                )
+
+                headers = full_msg.get("payload", {}).get("headers", [])
+
+                email_details = {
+                    "id": email_id,
+                    "threadId": msg["threadId"],
+                    "snippet": full_msg.get("snippet", ""),
+                    "labels": full_msg.get("labelIds", []),
+                    "size": full_msg.get("sizeEstimate", 0),
+                    "internalDate": full_msg.get("internalDate"),
+                    "subject": next(
+                        (h["value"] for h in headers if h["name"] == "Subject"),
+                        "No Subject",
+                    ),
+                    "from": next(
+                        (h["value"] for h in headers if h["name"] == "From"),
+                        "Unknown",
+                    ),
+                    "date": next(
+                        (h["value"] for h in headers if h["name"] == "Date"), ""
+                    ),
+                    "to": next((h["value"] for h in headers if h["name"] == "To"), ""),
+                }
+                messages.append(email_details)
+
+        return {"count": len(messages), "emails": messages}
+    except Exception as error:
+        logger.error(f"Get unread emails error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -136,13 +244,54 @@ async def read_email_tool(email_id: str):
         "required": ["email_id"]
     }
     """
+    try:
+        service = get_service()
+        msg = await asyncio.to_thread(
+            service.users()
+            .messages()
+            .get(userId="me", id=email_id, format="raw")
+            .execute
+        )
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    email_content = await gmail_service.read_email(email_id)
-    return email_content
+        # Decode the base64URL encoded raw content
+        raw_data = msg["raw"]
+        decoded_data = urlsafe_b64decode(raw_data)
+
+        # Parse the RFC 2822 email
+        mime_message = message_from_bytes(decoded_data)
+
+        # Extract the email body
+        body = None
+        if mime_message.is_multipart():
+            for part in mime_message.walk():
+                if part.get_content_type() == "text/plain":
+                    body = part.get_payload(decode=True).decode()
+                    break
+        else:
+            body = mime_message.get_payload(decode=True).decode()
+
+        email_metadata = {
+            "content": body,
+            "subject": decode_mime_header(mime_message.get("subject", "")),
+            "from": mime_message.get("from", ""),
+            "to": mime_message.get("to", ""),
+            "date": mime_message.get("date", ""),
+        }
+
+        logger.info(f"Email read: {email_id}")
+
+        # Mark as read
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(userId="me", id=email_id, body={"removeLabelIds": ["UNREAD"]})
+            .execute
+        )
+
+        return email_metadata
+    except Exception as error:
+        logger.error(f"Read email error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -162,12 +311,16 @@ async def trash_email_tool(email_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    trash_response = await gmail_service.trash_email(email_id)
-    return trash_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users().messages().trash(userId="me", id=email_id).execute
+        )
+        logger.info(f"Email moved to trash: {email_id}")
+        return {"status": "success", "message": "Email moved to trash successfully."}
+    except Exception as error:
+        logger.error(f"Trash email error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -187,12 +340,19 @@ async def mark_email_as_read_tool(email_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    mark_response = await gmail_service.mark_email_as_read(email_id)
-    return mark_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(userId="me", id=email_id, body={"removeLabelIds": ["UNREAD"]})
+            .execute
+        )
+        logger.info(f"Email marked as read: {email_id}")
+        return {"status": "success", "message": "Email marked as read."}
+    except Exception as error:
+        logger.error(f"Mark as read error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -220,14 +380,31 @@ async def create_draft_tool(recipient_id: str, subject: str, message: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    create_draft_response = await gmail_service.create_draft(
-        recipient_id, subject, message
-    )
-    return create_draft_response
+    try:
+        service = get_service()
+        user_email = await get_user_email(service)
+
+        message_obj = EmailMessage()
+        message_obj.set_content(message)
+        message_obj["To"] = recipient_id
+        message_obj["From"] = user_email
+        message_obj["Subject"] = subject
+
+        encoded_message = base64.urlsafe_b64encode(message_obj.as_bytes()).decode()
+        create_message = {"raw": encoded_message}
+
+        draft = await asyncio.to_thread(
+            service.users()
+            .drafts()
+            .create(userId="me", body={"message": create_message})
+            .execute
+        )
+
+        logger.info(f"Draft created: {draft['id']}")
+        return {"status": "success", "draft_id": draft["id"]}
+    except Exception as error:
+        logger.error(f"Create draft error: {str(error)}")
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
@@ -241,13 +418,38 @@ async def list_drafts_tool():
         "required": []
     }
     """
+    try:
+        service = get_service()
+        results = await asyncio.to_thread(
+            service.users().drafts().list(userId="me").execute
+        )
+        drafts = results.get("drafts", [])
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    drafts_response = await gmail_service.list_drafts()
-    return drafts_response
+        draft_list = []
+        for draft in drafts:
+            draft_id = draft["id"]
+            draft_data = await asyncio.to_thread(
+                service.users().drafts().get(userId="me", id=draft_id).execute
+            )
+
+            message = draft_data.get("message", {})
+            headers = message.get("payload", {}).get("headers", [])
+
+            subject = next(
+                (h["value"] for h in headers if h["name"].lower() == "subject"),
+                "No Subject",
+            )
+            to = next(
+                (h["value"] for h in headers if h["name"].lower() == "to"),
+                "No Recipient",
+            )
+
+            draft_list.append({"id": draft_id, "subject": subject, "to": to})
+
+        return {"count": len(draft_list), "drafts": draft_list}
+    except Exception as error:
+        logger.error(f"List drafts error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -262,12 +464,27 @@ async def list_labels_tool():
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    labels_response = await gmail_service.list_labels()
-    return labels_response
+    try:
+        service = get_service()
+        results = await asyncio.to_thread(
+            service.users().labels().list(userId="me").execute
+        )
+        labels = results.get("labels", [])
+
+        label_list = []
+        for label in labels:
+            label_list.append(
+                {
+                    "id": label["id"],
+                    "name": label["name"],
+                    "type": label.get("type", "user"),
+                }
+            )
+
+        return {"count": len(label_list), "labels": label_list}
+    except Exception as error:
+        logger.error(f"List labels error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -287,12 +504,27 @@ async def create_label_tool(name: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    create_label_response = await gmail_service.create_label(name)
-    return create_label_response
+    try:
+        service = get_service()
+        label_object = {
+            "name": name,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show",
+        }
+
+        created_label = await asyncio.to_thread(
+            service.users().labels().create(userId="me", body=label_object).execute
+        )
+
+        logger.info(f"Label created: {created_label['id']}")
+        return {
+            "status": "success",
+            "label_id": created_label["id"],
+            "name": created_label["name"],
+        }
+    except Exception as error:
+        logger.error(f"Create label error: {str(error)}")
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
@@ -316,12 +548,20 @@ async def apply_label_tool(email_id: str, label_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    apply_label_response = await gmail_service.apply_label(email_id, label_id)
-    return apply_label_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(userId="me", id=email_id, body={"addLabelIds": [label_id]})
+            .execute
+        )
+
+        logger.info(f"Label {label_id} applied to email {email_id}")
+        return {"status": "success", "message": "Label applied successfully to email."}
+    except Exception as error:
+        logger.error(f"Apply label error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -345,12 +585,23 @@ async def remove_labels_tool(email_id: str, label_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    remove_label_response = await gmail_service.remove_label(email_id, label_id)
-    return remove_label_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(userId="me", id=email_id, body={"removeLabelIds": [label_id]})
+            .execute
+        )
+
+        logger.info(f"Label {label_id} removed from email {email_id}")
+        return {
+            "status": "success",
+            "message": "Label removed successfully from email.",
+        }
+    except Exception as error:
+        logger.error(f"Remove label error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -370,12 +621,31 @@ async def search_by_label_tool(label_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    search_response = await gmail_service.search_by_label(label_id)
-    return search_response
+    try:
+        service = get_service()
+        query = f"label:{label_id}"
+
+        response = await asyncio.to_thread(
+            service.users().messages().list(userId="me", q=query).execute
+        )
+
+        messages = []
+        if "messages" in response:
+            messages.extend(response["messages"])
+
+        while "nextPageToken" in response:
+            page_token = response["nextPageToken"]
+            response = await asyncio.to_thread(
+                service.users()
+                .messages()
+                .list(userId="me", q=query, pageToken=page_token)
+                .execute
+            )
+            messages.extend(response["messages"])
+
+        return messages
+    except HttpError as error:
+        return f"An HttpError occurred: {str(error)}"
 
 
 """This tool is not working with the Gmail API but there is a way using the google.auth"""
@@ -420,13 +690,15 @@ async def list_filters_tool():
         "required": []
     }
     """
-
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    filters_response = await gmail_service.list_filters()
-    return filters_response
+    try:
+        service = get_service()
+        results = await asyncio.to_thread(
+            service.users().settings().filters().list(userId="me").execute
+        )
+        filters = results.get("filter", [])
+        return filters
+    except HttpError as error:
+        return f"An HttpError occurred: {str(error)}"
 
 
 @mcp.tool()
@@ -446,12 +718,14 @@ async def get_filter_tool(filter_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    filter_response = await gmail_service.get_filter(filter_id)
-    return filter_response
+    try:
+        service = get_service()
+        filter_data = await asyncio.to_thread(
+            service.users().settings().filters().get(userId="me", id=filter_id).execute
+        )
+        return filter_data
+    except HttpError as error:
+        return f"An HttpError occurred: {str(error)}"
 
 
 @mcp.tool()
@@ -471,12 +745,19 @@ async def delete_filter_tool(filter_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    delete_filter_response = await gmail_service.delete_filter(filter_id=filter_id)
-    return delete_filter_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .settings()
+            .filters()
+            .delete(userId="me", id=filter_id)
+            .execute()
+        )
+        logger.info(f"Filter deleted: {filter_id}")
+        return "Filter deleted successfully."
+    except HttpError as error:
+        return f"An HttpError occurred: {str(error)}"
 
 
 @mcp.tool()
@@ -499,18 +780,64 @@ async def search_emails_tool(query: str, max_results: int | None = None):
         "required": ["query"]
     }
     """
-    # Convert string to int if needed (some LLMs pass strings)
-    if max_results is not None and isinstance(max_results, str):
-        max_results = int(max_results)
+    try:
+        service = get_service()
+        response = await asyncio.to_thread(
+            service.users()
+            .messages()
+            .list(userId="me", q=query, maxResults=max_results)
+            .execute
+        )
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    search_response = await gmail_service.search_emails(
-        query=query, max_results=max_results
-    )
-    return search_response
+        messages = []
+        if "messages" in response:
+            messages.extend(response["messages"])
+
+        # Get metadata for each message
+        result_messages = []
+        for msg in messages:
+            msg_data = await asyncio.to_thread(
+                service.users()
+                .messages()
+                .get(
+                    userId="me",
+                    id=msg["id"],
+                    format="metadata",
+                    metadataHeaders=["Subject", "From", "Date"],
+                )
+                .execute
+            )
+
+            headers = msg_data.get("payload", {}).get("headers", [])
+
+            subject = next(
+                (h["value"] for h in headers if h["name"].lower() == "subject"),
+                "No Subject",
+            )
+            sender = next(
+                (h["value"] for h in headers if h["name"].lower() == "from"),
+                "Unknown Sender",
+            )
+            date = next(
+                (h["value"] for h in headers if h["name"].lower() == "date"),
+                "",
+            )
+
+            result_messages.append(
+                {
+                    "id": msg["id"],
+                    "threadId": msg["threadId"],
+                    "subject": subject,
+                    "from": sender,
+                    "date": date,
+                    "snippet": msg_data.get("snippet", ""),
+                }
+            )
+
+        return {"count": len(result_messages), "emails": result_messages}
+    except Exception as error:
+        logger.error(f"Search emails error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -530,12 +857,28 @@ async def create_folder_tool(name: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    create_folder_response = await gmail_service.create_folder(name=name)
-    return create_folder_response
+    try:
+        service = get_service()
+        label_object = {
+            "name": name,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show",
+            "type": "user",
+        }
+
+        created_label = await asyncio.to_thread(
+            service.users().labels().create(userId="me", body=label_object).execute
+        )
+
+        logger.info(f"Folder created: {created_label['id']}")
+        return {
+            "status": "success",
+            "folder_id": created_label["id"],
+            "name": created_label["name"],
+        }
+    except Exception as error:
+        logger.error(f"Create folder error: {str(error)}")
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
@@ -559,14 +902,24 @@ async def move_to_folder_tool(email_id: str, folder_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    move_to_folder_response = await gmail_service.move_to_folder(
-        email_id=email_id, folder_id=folder_id
-    )
-    return move_to_folder_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(
+                userId="me",
+                id=email_id,
+                body={"addLabelIds": [folder_id], "removeLabelIds": ["INBOX"]},
+            )
+            .execute
+        )
+
+        logger.info(f"Email {email_id} moved to folder {folder_id}")
+        return {"status": "success", "message": "Email moved to folder successfully."}
+    except Exception as error:
+        logger.error(f"Move to folder error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -581,12 +934,24 @@ async def list_folders_tool():
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    folders_response = await gmail_service.list_folders()
-    return folders_response
+    try:
+        service = get_service()
+        results = await asyncio.to_thread(
+            service.users().labels().list(userId="me").execute
+        )
+        labels = results.get("labels", [])
+
+        # Filter to only include user-created labels
+        folders = [
+            {"id": label["id"], "name": label["name"]}
+            for label in labels
+            if label.get("type") == "user"
+        ]
+
+        return {"count": len(folders), "folders": folders}
+    except Exception as error:
+        logger.error(f"List folders error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -609,13 +974,33 @@ async def rename_labels_tool(label_id: str, new_name: str):
         "required": ["label_id", "new_name"]
     }
     """
+    try:
+        service = get_service()
+        # Get current label
+        label = await asyncio.to_thread(
+            service.users().labels().get(userId="me", id=label_id).execute
+        )
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    rename_label_response = await gmail_service.rename_label(label_id, new_name)
-    return rename_label_response
+        # Update name
+        label["name"] = new_name
+
+        # Update the label
+        updated_label = await asyncio.to_thread(
+            service.users()
+            .labels()
+            .update(userId="me", id=label_id, body=label)
+            .execute
+        )
+
+        logger.info(f"Label renamed: {label_id} to {new_name}")
+        return {
+            "status": "success",
+            "label_id": updated_label["id"],
+            "name": updated_label["name"],
+        }
+    except Exception as error:
+        logger.error(f"Rename label error: {str(error)}")
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
@@ -635,12 +1020,17 @@ async def delete_label_tool(label_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    delete_label_response = await gmail_service.delete_label(label_id)
-    return delete_label_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users().labels().delete(userId="me", id=label_id).execute
+        )
+
+        logger.info(f"Label deleted: {label_id}")
+        return {"status": "success", "message": "Label deleted successfully."}
+    except Exception as error:
+        logger.error(f"Delete label error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -660,12 +1050,20 @@ async def archive_email_tool(email_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    archive_response = await gmail_service.archive_email(email_id=email_id)
-    return archive_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(userId="me", id=email_id, body={"removeLabelIds": ["INBOX"]})
+            .execute
+        )
+
+        logger.info(f"Email archived: {email_id}")
+        return {"status": "success", "message": "Email archived successfully."}
+    except Exception as error:
+        logger.error(f"Archive email error: {str(error)}")
+        return {"error": str(error)}
 
 
 @mcp.tool()
@@ -688,18 +1086,56 @@ async def batch_archive_tool(query: str, max_emails: int = 100):
         "required": ["query"]
     }
     """
-    # Convert string to int if needed (some LLMs pass strings)
-    if isinstance(max_emails, str):
-        max_emails = int(max_emails)
+    try:
+        service = get_service()
+        # First, search for emails matching the query
+        user_id = "me"
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    archive_response = await gmail_service.batch_archive(
-        query=query, max_emails=max_emails
-    )
-    return archive_response
+        response = await asyncio.to_thread(
+            service.users()
+            .messages()
+            .list(userId=user_id, q=query, maxResults=max_emails)
+            .execute
+        )
+
+        messages = []
+        if "messages" in response:
+            messages.extend(response["messages"])
+
+        if not messages:
+            return {
+                "status": "success",
+                "archived_count": 0,
+                "message": "No emails found matching the query.",
+            }
+
+        # Archive each email in the batch
+        archived_count = 0
+        for msg in messages:
+            try:
+                await asyncio.to_thread(
+                    service.users()
+                    .messages()
+                    .modify(
+                        userId="me",
+                        id=msg["id"],
+                        body={"removeLabelIds": ["INBOX"]},
+                    )
+                    .execute
+                )
+                archived_count += 1
+            except Exception as e:
+                logger.error(f"Error archiving email {msg['id']}: {str(e)}")
+
+        logger.info(f"Batch archived {archived_count} emails")
+        return {
+            "status": "success",
+            "archived_count": archived_count,
+            "total_found": len(messages),
+            "message": f"Successfully archived {archived_count} out of {len(messages)} emails.",
+        }
+    except HttpError as error:
+        return {"status": "error", "error_message": str(error)}
 
 
 @mcp.tool()
@@ -718,18 +1154,14 @@ async def list_archived_tool(max_results: int = 100):
         "required": []
     }
     """
-    # Convert string to int if needed (some LLMs pass strings)
-    if isinstance(max_results, str):
-        max_results = int(max_results)
-
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    archived_emails_response = await gmail_service.list_archived(
-        max_results=max_results
-    )
-    return archived_emails_response
+    try:
+        service = get_service()
+        # Search for emails that are in "All Mail" but not in "Inbox"
+        query = "-in:inbox"
+        # Use the existing search_emails method
+        return await search_emails_tool(service, query, max_results)
+    except Exception as error:
+        return f"An error occurred: {str(error)}"
 
 
 @mcp.tool()
@@ -749,9 +1181,17 @@ async def restore_to_inbox_tool(email_id: str):
     }
     """
 
-    gmail_service = GmailService(
-        creds_file_path=GMAIL_CRED_PATH,
-        token_path=GMAIL_TOKEN_PATH,
-    )
-    restore_response = await gmail_service.restore_to_inbox(email_id=email_id)
-    return restore_response
+    try:
+        service = get_service()
+        await asyncio.to_thread(
+            service.users()
+            .messages()
+            .modify(userId="me", id=email_id, body={"addLabelIds": ["INBOX"]})
+            .execute
+        )
+
+        logger.info(f"Email restored to inbox: {email_id}")
+        return {"status": "success", "message": "Email restored to inbox successfully."}
+    except Exception as error:
+        logger.error(f"Restore to inbox error: {str(error)}")
+        return {"error": str(error)}
