@@ -1,13 +1,15 @@
 import functools
 import logging
 import os
+import sys
 from typing import Callable, Dict
 from pathlib import Path
 
+from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
-from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 logger = logging.getLogger(__name__)
 
@@ -18,14 +20,10 @@ SCOPES = {
         "https://www.googleapis.com/auth/gmail.settings.basic",
         "https://www.googleapis.com/auth/gmail.settings.sharing",
     ],
-    "calendar_read": [
-        "https://www.googleapis.com/auth/calendar.readonly",
-    ],
-    "calendar_events": [
-        "https://www.googleapis.com/auth/calendar.events",
-    ],
     "calendar": [
         "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.readonly",
+        "https://www.googleapis.com/auth/calendar.events",
     ],
 }
 
@@ -55,7 +53,7 @@ def get_google_service(
 
     cache_key = f"{service_type}_{scope_key}"
     if not force_refresh and cache_key in _service_cache:
-        logger.info(f"Using cached service for {cache_key}")
+        logger.info(f"Returning cached service for {cache_key}")
         return _service_cache[cache_key]
 
     creds = None
@@ -63,94 +61,56 @@ def get_google_service(
 
     logger.info(f"Authenticating {service_type} with scopes: {scope_key}")
 
+    # Load existing credentials from token.json
     if os.path.exists(token_path):
-        logger.info(f"Loading token from {token_path}")
-        try:
-            creds = Credentials.from_authorized_user_file(token_path, scopes)
-        except Exception as e:
-            logger.error(f"Failed to load token: {e}")
-            creds = None
+        logger.info(f"Loading credentials from {token_path}")
+        creds = Credentials.from_authorized_user_file(token_path, scopes)
 
+    # If there are no (valid) credentials available, let the user log in
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
-            logger.info("Refreshing expired token")
-            try:
-                creds.refresh(Request())
-                logger.info("Token refreshed successfully")
-            except Exception as e:
-                logger.error(f"Token refresh failed: {e}")
-                logger.info("Will request new token")
-                creds = None
-
-        if not creds:
-            logger.info("Requesting new token from user")
-            if not os.path.exists(creds_path):
-                raise FileNotFoundError(
-                    f"Credentials file not found: {creds_path}\n"
-                    f"Please download it from Google Cloud Console"
-                )
-
+            logger.info("Refreshing expired credentials")
+            creds.refresh(Request())
+        else:
+            logger.info(f"Starting new authentication flow using {creds_path}")
             flow = InstalledAppFlow.from_client_secrets_file(creds_path, scopes)
             creds = flow.run_local_server(port=0)
-            logger.info("New token obtained")
 
-        try:
-            with open(token_path, "w") as token_file:
-                token_file.write(creds.to_json())
-                logger.info(f"Token saved to {token_path}")
-        except Exception as e:
-            logger.error(f"Failed to save token: {e}")
+        # Save the credentials for the next run
+        logger.info(f"Saving credentials to {token_path}")
+        with open(token_path, "w") as token:
+            token.write(creds.to_json())
 
-    version = "v1"
+    # Determine API version
+    version = "v1" if service_type == "gmail" else "v3"
+
+    logger.info(f"Building {service_type} service version {version}")
     service = build(service_type, version, credentials=creds)
-    logger.info(f"Service {service_type} v{version} built successfully")
 
+    # Cache the service
     _service_cache[cache_key] = service
+    logger.info(f"Service {cache_key} created and cached successfully")
 
     return service
 
 
 def require_google_service(service_type: str, scope_key: str):
-    """
-    Decorator to inject authenticated Google service into function.
+    """Decorator to inject Google service into function"""
 
-    Args:
-        service_type: Type of service ('gmail', 'calendar', etc.)
-        scope_key: Key for scopes in SCOPES dict
-
-    Usage:
-        @require_google_service("gmail", "gmail")
-        async def send_email(service, recipient: str, subject: str, body: str):
-            # service is automatically injected as first parameter
-            result = service.users().messages().send(...).execute()
-    """
-
-    def decorator(func: Callable) -> Callable:
+    def decorator(func: Callable):
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
-            # Get paths from environment or use defaults
+        def wrapper(*args, **kwargs):
             base_dir = Path(__file__).parent.parent
-            token_path = os.getenv(
-                "GOOGLE_TOKEN_PATH", str(base_dir / "cred" / "token.json")
-            )
-            creds_path = os.getenv(
-                "GOOGLE_CREDENTIALS_PATH", str(base_dir / "cred" / "credentials.json")
-            )
+            token_path = str(base_dir / "cred" / "token.json")
+            creds_path = str(base_dir / "cred" / "setup_cred.json")
 
-            # Get authenticated service
-            try:
-                service = get_google_service(
-                    service_type, scope_key, token_path, creds_path
-                )
-            except FileNotFoundError as e:
-                logger.error(str(e))
-                return {"error": str(e)}
-            except Exception as e:
-                logger.error(f"Authentication failed: {e}")
-                return {"error": f"Authentication failed: {str(e)}"}
-
-            # Inject service as first argument
-            return await func(service, *args, **kwargs)
+            service = get_google_service(
+                service_type=service_type,
+                scope_key=scope_key,
+                token_path=token_path,
+                creds_path=creds_path,
+            )
+            return func(service, *args, **kwargs)
 
         return wrapper
 
@@ -158,7 +118,7 @@ def require_google_service(service_type: str, scope_key: str):
 
 
 def clear_service_cache():
-    """Clear the service cache to force re-authentication"""
+    """Clear the service cache"""
     global _service_cache
     _service_cache.clear()
     logger.info("Service cache cleared")

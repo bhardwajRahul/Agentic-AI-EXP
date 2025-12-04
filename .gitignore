@@ -4,3 +4,5 @@
 **/.env
 **/data/
 **/result.txt
+**/test-client.py
+**/test.py
