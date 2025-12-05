@@ -12,7 +12,7 @@ from core.state import State
 class Route(BaseModel):
     """Route decision for supervisor"""
 
-    step: Literal["communication_agent", "calendar_agent", "productivity_agent"]
+    step: Literal["communication_agent", "productivity_agent"]
 
 
 def build_graph(tool_sets, checkpointer):
@@ -30,10 +30,10 @@ def build_graph(tool_sets, checkpointer):
         messages = State["messages"]
 
         system_prompt = (
-            "You are a supervisor managing three specialized workers:\n\n"
+            "You are a supervisor managing two specialized workers:\n\n"
             "1. **Communication Agent**: Handles emails all forms of communication.\n"
             "   - Use when: sending messages, checking emails, reaching out to people, communication tasks\n\n"
-            "3. **Productivity Agent**: Handles tasks, todos, project management (calender).\n"
+            "2. **Productivity Agent**: Handles tasks, todos, project management (calender).\n"
             "   - Use when: creating tasks, managing todos, project tracking, productivity queries\n\n"
             "Analyze the user's request and decide which agent is most appropriate to handle it.\n"
             "Consider the intent and context, not just keywords."
@@ -54,8 +54,8 @@ def build_graph(tool_sets, checkpointer):
     builder.add_node("communication_agent", comm_agent_node)
     builder.add_node("productivity_agent", prod_agent_node)
 
-    builder.add_node("comm_tools", ToolNode(tools=comm_tools))
-    builder.add_node("prod_tools", ToolNode(tools=prod_tools))
+    builder.add_node("comm_tools", ToolNode(tools=comm_tools, handle_tool_errors=True))
+    builder.add_node("prod_tools", ToolNode(tools=prod_tools, handle_tool_errors=True))
 
     builder.add_edge(START, "supervisor")
     builder.add_conditional_edges("supervisor", route_after_supervisor)

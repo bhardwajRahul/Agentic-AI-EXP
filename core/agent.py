@@ -60,7 +60,7 @@ def agent_node_factory(llm_with_tools):
 
         if hasattr(msg, "content") and msg.content:
             content_preview = (
-                msg.content[:300] + "..." if len(msg.content) > 300 else msg.content
+                msg.content[:1000] + "..." if len(msg.content) > 1000 else msg.content
             )
             logger.info(f"📄 Response content: {content_preview}")
             with open("D:\\Agentic AI\\core\\result.txt", "w", encoding="utf-8") as f:
