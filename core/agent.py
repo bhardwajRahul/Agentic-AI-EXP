@@ -5,6 +5,7 @@ from langchain_core.messages import trim_messages
 from core.state import State
 from utils.logger import request_counter, setup_logger
 from utils.token_counter import count_tokens
+from utils.context_cleaner import sanitize_history
 
 logger = setup_logger(__name__)
 
