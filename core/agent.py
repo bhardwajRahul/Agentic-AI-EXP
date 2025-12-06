@@ -1,8 +1,7 @@
 import json
-
+from datetime import datetime
 from langchain_core.messages import trim_messages
 
-from config.prompts import SYSTEM_PROMPT
 from core.state import State
 from utils.logger import request_counter, setup_logger
 from utils.token_counter import count_tokens
@@ -10,7 +9,7 @@ from utils.token_counter import count_tokens
 logger = setup_logger(__name__)
 
 
-def agent_node_factory(llm_with_tools):
+def agent_node_factory(llm_with_tools, system_prompt):
     def agent_node(state: State):
         request_counter["count"] += 1
         request_num = request_counter["count"]
@@ -29,6 +28,18 @@ def agent_node_factory(llm_with_tools):
             include_system=True,
             start_on="human",
         )
+
+        try:
+            formatted_prompt = system_prompt.format(
+                current_time=datetime.now().strftime("%Y-%m-%d %H:%M")
+            )
+        except KeyError:
+            # If the prompt (like Comm Agent) doesn't have {current_time}, use as is
+            formatted_prompt = system_prompt
+        except Exception as e:
+            logger.error(f"Error formatting prompt: {e}")
+            formatted_prompt = system_prompt
+
         logger.info("=" * 80)
         if last_messages:
             content_preview = (
@@ -38,7 +49,7 @@ def agent_node_factory(llm_with_tools):
             )
             logger.info(f"📝 Content preview: {content_preview}")
 
-        messages = [{"role": "system", "content": SYSTEM_PROMPT}] + last_messages
+        messages = [{"role": "system", "content": formatted_prompt}] + last_messages
 
         logger.info("=" * 80)
 

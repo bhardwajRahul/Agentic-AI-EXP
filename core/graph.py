@@ -7,6 +7,16 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from core.agent import agent_node_factory
 from core.llm import build_llm_with_tools
 from core.state import State
+from config.prompts import (
+    SUPERVISOR_SYSTEM_PROMPT,
+    COMM_SYSTEM_PROMPT,
+    PROD_SYSTEM_PROMPT,
+)
+from langchain_core.messages import trim_messages
+from utils.logger import request_counter, setup_logger
+from utils.token_counter import count_tokens
+
+logger = setup_logger(__name__)
 
 
 class Route(BaseModel):
@@ -23,30 +33,23 @@ def build_graph(tool_sets, checkpointer):
     prod_llm = build_llm_with_tools(prod_tools)
     supervisor_llm = build_llm_with_tools([])
 
-    comm_agent_node = agent_node_factory(comm_llm)
-    prod_agent_node = agent_node_factory(prod_llm)
+    comm_agent_node = agent_node_factory(comm_llm, COMM_SYSTEM_PROMPT)
+    prod_agent_node = agent_node_factory(prod_llm, PROD_SYSTEM_PROMPT)
 
     def supervisor_node(State):
         messages = State["messages"]
 
-        system_prompt = (
-            "You are a supervisor managing two specialized workers:\n\n"
-            "1. **Communication Agent**: Handles emails all forms of communication.\n"
-            "   - Use when: sending messages, checking emails, reaching out to people, communication tasks\n\n"
-            "2. **Productivity Agent**: Handles tasks, todos, project management (calender).\n"
-            "   - Use when: creating tasks, managing todos, project tracking, productivity queries\n\n"
-            "Analyze the user's request and decide which agent is most appropriate to handle it.\n"
-            "Consider the intent and context, not just keywords."
-        )
-
         router = supervisor_llm.with_structured_output(Route)
 
-        response = router.invoke([SystemMessage(content=system_prompt)] + messages)
+        response = router.invoke(
+            [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + messages
+        )
 
         return {"next": response.step}
 
     def route_after_supervisor(state: State):
-        return state.get("next", "communication_agent")
+        # supervisor_node sets state["next"] to "communication_agent" or "productivity_agent"
+        return state["next"]
 
     builder = StateGraph(State)
 
