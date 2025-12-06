@@ -36,14 +36,45 @@ def build_graph(tool_sets, checkpointer):
     comm_agent_node = agent_node_factory(comm_llm, COMM_SYSTEM_PROMPT)
     prod_agent_node = agent_node_factory(prod_llm, PROD_SYSTEM_PROMPT)
 
-    def supervisor_node(State):
-        messages = State["messages"]
+    def supervisor_node(state: State):
+        request_counter["count"] += 1
+        request_num = request_counter["count"]
 
+        logger.info("=" * 80)
+        logger.info(f"👮 SUPERVISOR REQUEST #{request_num}")
+        logger.info("=" * 80)
+
+        logger.info(f"📨 Messages in context: {len(state['messages'])}")
+
+        last_messages = trim_messages(
+            state["messages"],
+            max_tokens=2000,
+            strategy="last",
+            token_counter=count_tokens,
+            include_system=True,
+            start_on="human",
+        )
+
+        if last_messages:
+            preview = str(last_messages[-1].content)
+            content_preview = preview[:100] + "..." if len(preview) > 100 else preview
+            logger.info(f"📝 Latest Input: {content_preview}")
+        logger.info("=" * 80)
+        # --- LOGGING END ---
+
+        # 1. Prepare Logic
         router = supervisor_llm.with_structured_output(Route)
 
+        # 2. Invoke LLM
         response = router.invoke(
-            [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + messages
+            [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + state["messages"]
         )
+
+        # --- LOGGING RESULT ---
+        logger.info(f"🧭 ROUTING DECISION MADE")
+        logger.info(f"👉 Selected Agent: {response.step}")
+        logger.info("=" * 80)
+        # ----------------------
 
         return {"next": response.step}
 
