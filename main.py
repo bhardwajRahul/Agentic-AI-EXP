@@ -5,9 +5,9 @@ import aiosqlite
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from config.settings import (
+    COMMUNICATION_SERVER,
     DB_PATH,
     DEFAULT_THREAD_ID,
-    COMMUNICATION_SERVER,
     PRODUCTIVITY_SERVER,
 )
 from core.graph import build_graph
