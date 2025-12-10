@@ -2,6 +2,9 @@ import json
 from datetime import datetime
 
 from langchain_core.messages import trim_messages
+from langgraph.types import interrupt
+from langchain_core.messages import HumanMessage
+from langgraph.graph import END
 
 from core.state import State
 from utils.context_cleaner import sanitize_history
@@ -89,3 +92,22 @@ def agent_node_factory(llm_with_tools, system_prompt):
         return {"messages": [msg]}
 
     return agent_node
+
+
+def human_node(state: State):
+    last_message = state["messages"][-1]
+    user_input = interrupt(last_message.content)
+    logger.info(f"👤 User Input: {user_input}")
+
+    return {"messages": [HumanMessage(content=user_input)]}
+
+
+def route_after_human(state: State):
+    messages = state["messages"]
+    if len(messages) < 2:
+        return END
+    last_ai_msg = messages[-2].name
+
+    if last_ai_msg == "communication_agent":
+        return last_ai_msg
+    return END

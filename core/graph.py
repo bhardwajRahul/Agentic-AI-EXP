@@ -7,7 +7,7 @@ from config.prompts import (
     PRODUCTIVITY_SYSTEM_PROMPT,
     SUPERVISOR_SYSTEM_PROMPT,
 )
-from core.agent import agent_node_factory
+from core.agent import agent_node_factory, human_node, route_after_human
 from core.llm import build_llm_with_tools
 from core.state import Route, State, route_after_supervisor, internal_agent_route
 from utils.logger import request_counter, setup_logger
@@ -85,6 +85,7 @@ def build_graph(tool_sets, checkpointer):
     builder.add_node("supervisor", supervisor_node)
     builder.add_node("communication_agent", communication_agent_node)
     builder.add_node("productivity_agent", productivity_agent_node)
+    builder.add_node("human_node", human_node)
 
     builder.add_node(
         "communication_tools",
@@ -110,7 +111,11 @@ def build_graph(tool_sets, checkpointer):
     builder.add_conditional_edges(
         "communication_agent",
         internal_agent_route,
-        {"tools": "communication_tools", "supervisor": "supervisor", "ASK": END},
+        {
+            "tools": "communication_tools",
+            "supervisor": "supervisor",
+            "ASK": "human_node",
+        },
     )
 
     builder.add_edge("communication_tools", "communication_agent")
@@ -118,9 +123,22 @@ def build_graph(tool_sets, checkpointer):
     builder.add_conditional_edges(
         "productivity_agent",
         internal_agent_route,
-        {"tools": "productivity_tools", "supervisor": "supervisor", "ASK": END},
+        {
+            "tools": "productivity_tools",
+            "supervisor": "supervisor",
+            "ASK": "human_node",
+        },
     )
     builder.add_edge("productivity_tools", "productivity_agent")
+
+    builder.add_conditional_edges(
+        "human_node",
+        route_after_human,
+        {
+            "communication_agent": "communication_agent",
+            "productivity_agent": "productivity_agent",
+        },
+    )
 
     graph = builder.compile(checkpointer=checkpointer)
     return graph
