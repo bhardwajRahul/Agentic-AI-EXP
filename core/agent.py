@@ -44,13 +44,8 @@ def agent_node_factory(llm_with_tools, system_prompt):
 
         logger.info("=" * 80)
         if last_messages:
-            content_preview = (
-                last_messages[:20] + ["..."]
-                if len(str(last_messages)) > 20
-                else str(last_messages)
-            )
-            content_preview = sanitize_history(content_preview)
-            content_preview = json.dumps(content_preview[-3:], indent=2)
+            content_preview = sanitize_history(last_messages)
+            content_preview = json.dumps(content_preview[-10:], indent=2)
             logger.info(f"📝 Content preview: {content_preview}")
 
         messages = [{"role": "system", "content": formatted_prompt}] + last_messages

@@ -1,8 +1,7 @@
 from typing import Annotated, Literal, Optional
 
-from langgraph.graph import END
 from langgraph.graph.message import add_messages
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
 
 
@@ -13,24 +12,32 @@ class State(TypedDict):
 
 
 class Route(BaseModel):
-    """
-    Supervisor's decision.
-    - If 'next' is chosen, we route to a worker.
-    - If 'direct_reply' is chosen, we answer the user direclty when no tools are needed.
-    """
+    """Routing decision for the supervisor"""
 
-    step: Optional[Literal["communication_agent", "productivity_agent"]] = None
-    direct_reply: Optional[str] = None
+    step: Literal["communication_agent", "productivity_agent", "FINISH"] = Field(
+        description="The next agent to route to, or FINISH if done"
+    )
 
 
 def route_after_supervisor(state: State):
-    next_dest = state.get("next")
+    return state["next"]
 
-    # If Supervisor chose to reply directly, we exit the graph
-    if next_dest == "__end__":
-        return END
 
-    if next_dest:
-        return next_dest
+def internal_agent_route(state: State):
+    last_message = state["messages"][-1]
 
-    return END
+    if hasattr(last_message, "tool_calls") and len(last_message.tool_calls) > 0:
+        return "tools"
+
+    content = last_message.content.upper()
+
+    if "FINAL ANSWER" in content:
+        return "supervisor"
+
+    if any(
+        keyword in content
+        for keyword in ["CLARIFICATION NEEDED", "PLEASE SPECIFY", "?"]
+    ):
+        return "ASK"
+
+    return "supervisor"
