@@ -16,12 +16,11 @@ prod_server = FastMCP(
     stateless_http=True,
 )
 
-# Storage Server (example for future)
-storage_server = FastMCP(
-    name="Storage Server",
+content_server = FastMCP(
+    name="Content Server",
     host="0.0.0.0",
     port=8052,
     stateless_http=True,
 )
 
-__all__ = ["comm_server", "prod_server", "storage_server"]
+__all__ = ["comm_server", "prod_server", "content_server"]

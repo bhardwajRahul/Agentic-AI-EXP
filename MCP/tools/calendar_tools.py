@@ -11,7 +11,6 @@ import logging
 import re
 import sys
 import uuid
-from email.header import decode_header
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -46,18 +45,6 @@ def get_service():
     except Exception as e:
         logger.error(f"Failed to get Calendar service: {str(e)}")
         raise
-
-
-def decode_mime_header(header: str) -> str:
-    """Helper function to decode encoded email headers"""
-    decoded_parts = decode_header(header)
-    decoded_string = ""
-    for part, encoding in decoded_parts:
-        if isinstance(part, bytes):
-            decoded_string += part.decode(encoding or "utf-8")
-        else:
-            decoded_string += part
-    return decoded_string
 
 
 def _parse_reminders_json(

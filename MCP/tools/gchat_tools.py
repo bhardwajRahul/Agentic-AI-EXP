@@ -31,8 +31,8 @@ def get_service():
     creds_path = str(base_dir / "cred" / "setup_cred.json")
 
     return get_google_service(
-        service_type="chat",
-        scope_key="chat",
+        service_type="gchat",
+        scope_key="gchat",
         token_path=token_path,
         creds_path=creds_path,
     )

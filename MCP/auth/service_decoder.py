@@ -23,6 +23,11 @@ SCOPES = {
         "https://www.googleapis.com/auth/calendar.readonly",
         "https://www.googleapis.com/auth/calendar.events",
     ],
+    "gchat": [
+        "https://www.googleapis.com/auth/chat.messages.readonly",
+        "https://www.googleapis.com/auth/chat.messages",
+        "https://www.googleapis.com/auth/chat.spaces",
+    ],
 }
 
 _service_cache: Dict[str, any] = {}
@@ -85,11 +90,13 @@ def get_google_service(
         with open(token_path, "w") as token:
             token.write(creds.to_json())
 
-    # Determine API version
-    version = "v1" if service_type == "gmail" else "v3"
+    # Determine API version and service name mapping
+    # Google Chat API uses "chat" as the service name, but we refer to it as "gchat" internally
+    api_service_name = "chat" if service_type == "gchat" else service_type
+    version = "v1" if service_type in ["gmail", "gchat"] else "v3"
 
-    logger.info(f"Building {service_type} service version {version}")
-    service = build(service_type, version, credentials=creds)
+    logger.info(f"Building {api_service_name} service version {version}")
+    service = build(api_service_name, version, credentials=creds)
 
     # Cache the service
     _service_cache[cache_key] = service
