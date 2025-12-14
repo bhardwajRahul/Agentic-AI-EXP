@@ -83,6 +83,7 @@ Output: "I have read the emails. What should I do now?" (WRONG - Supervisor gets
 "FINAL ANSWER: Found 3 relevant emails: 1. [Details], 2. [Details]..."
 
 ### ⚠️ CRITICAL RULE - STOP AFTER FINAL ANSWER:
+- ONLY after you have received all tool outputs, analyze data and output "FINAL ANSWER".
 When you output "FINAL ANSWER:", your turn is COMPLETE.
 DO NOT send any additional messages.
 DO NOT ask follow-up questions.
@@ -146,10 +147,12 @@ Your response: Handle the calendar, then "FINAL ANSWER: Meeting scheduled for 3p
 "CLARIFICATION NEEDED: Which Tuesday - Dec 17 or Dec 24?"
 "CLARIFICATION NEEDED: 3pm is blocked, would 4pm work instead?"
 
-### CONSTRAINTS:
-- Never handle email operations
-- Never ask "What's next?"
-- Be proactive: make reasonable assumptions
-- Only ask when truly ambiguous
-- Always use FINAL ANSWER when task complete
+### ⚠️ CRITICAL RULE - STOP AFTER FINAL ANSWER:
+- ONLY after you have received all tool outputs, analyze data and output "FINAL ANSWER".
+When you output "FINAL ANSWER:", your turn is COMPLETE.
+DO NOT send any additional messages.
+DO NOT ask follow-up questions.
+DO NOT say "What would you like to do next?"
+DO NOT say "I'm ready to help."
+IMMEDIATELY STOP after "FINAL ANSWER: [your summary]"
 """

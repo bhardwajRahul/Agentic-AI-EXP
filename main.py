@@ -5,32 +5,16 @@ import aiosqlite
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from config.settings import (
-    COMMUNICATION_SERVER,
+    communication_config,
     DB_PATH,
     DEFAULT_THREAD_ID,
-    PLANNING_SERVER,
+    planning_config,
 )
 from core.graph import build_graph
 from utils.checkpointer import CleaningAsyncSqliteSaver
 from utils.logger import request_counter, setup_logger
 
 logger = setup_logger(__name__)
-
-communication_config = {
-    "communication": {
-        "transport": "stdio",
-        "command": "python",
-        "args": [str(COMMUNICATION_SERVER)],
-    }
-}
-
-planning_config = {
-    "planning": {
-        "transport": "stdio",
-        "command": "python",
-        "args": [str(PLANNING_SERVER)],
-    }
-}
 
 
 async def main():
@@ -39,7 +23,6 @@ async def main():
     logger.info("=" * 80)
 
     try:
-        # Initialize MCP clients (no context manager)
         communication_client = MultiServerMCPClient(communication_config)
         communication_tools = await communication_client.get_tools()
         logger.info(f"📧 Communication Tools: {len(communication_tools)}")
@@ -49,9 +32,10 @@ async def main():
         logger.info(f"✅ Planning Tools: {len(planning_tools)}")
         tool_sets = {"communication": communication_tools, "planning": planning_tools}
 
-        async with aiosqlite.connect(str(DB_PATH)) as conn:
-            checkpointer = CleaningAsyncSqliteSaver(conn)
+        async with aiosqlite.connect(str(DB_PATH)) as connection:
+            checkpointer = CleaningAsyncSqliteSaver(connection)
             graph = build_graph(tool_sets, checkpointer)
+
             # g = graph.get_graph()
 
             # png_bytes = g.draw_mermaid_png()

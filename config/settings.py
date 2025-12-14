@@ -21,4 +21,20 @@ REQUEST_TIMEOUT = 30
 MAX_TOKENS = 2000
 TOKEN_STRATEGY = "last"
 
-DEFAULT_THREAD_ID = "gmail_thread_02"
+DEFAULT_THREAD_ID = "gmail_thread_10"
+
+communication_config = {
+    "communication": {
+        "transport": "stdio",
+        "command": "python",
+        "args": [str(COMMUNICATION_SERVER)],
+    }
+}
+
+planning_config = {
+    "planning": {
+        "transport": "stdio",
+        "command": "python",
+        "args": [str(PLANNING_SERVER)],
+    }
+}

@@ -29,14 +29,14 @@ def internal_agent_route(state: State) -> str:
     """Route from agent node to tools, supervisor, or human clarification"""
     last_message = state["messages"][-1]
 
+    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+        logger.info(f"🔧 Agent requesting {len(last_message.tool_calls)} tool(s)")
+        return "tools"
+
     if hasattr(last_message, "content") and isinstance(last_message.content, str):
         if "FINAL ANSWER:" in last_message.content.upper():
             logger.info("✅ Detected FINAL ANSWER - returning to supervisor")
             return "supervisor"
-
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        logger.info(f"🔧 Agent requesting {len(last_message.tool_calls)} tool(s)")
-        return "tools"
 
     if (
         hasattr(last_message, "content")

@@ -1,9 +1,8 @@
 import json
-from datetime import datetime
 
 from langchain_core.messages import trim_messages
 from langgraph.types import interrupt
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
 from langgraph.graph import END
 
 from core.state import State
@@ -14,7 +13,7 @@ from utils.token_counter import count_tokens
 logger = setup_logger(__name__)
 
 
-def agent_node_factory(llm_with_tools, system_prompt):
+def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
     def agent_node(state: State):
         request_counter["count"] += 1
         request_num = request_counter["count"]
@@ -27,38 +26,24 @@ def agent_node_factory(llm_with_tools, system_prompt):
 
         last_messages = trim_messages(
             state["messages"],
-            max_tokens=2000,
+            max_tokens=100090,
             strategy="last",
             token_counter=count_tokens,
             include_system=True,
             start_on="human",
         )
 
-        try:
-            formatted_prompt = system_prompt.format(
-                current_time=datetime.now().strftime("%Y-%m-%d %H:%M")
-            )
-        except KeyError:
-            # If the prompt (like Communication Agent) doesn't have {current_time}, use as is
-            formatted_prompt = system_prompt
-        except Exception as e:
-            logger.error(f"Error formatting prompt: {e}")
-            formatted_prompt = system_prompt
-
         logger.info("=" * 80)
-        if last_messages:
+        if last_messages:  # this is for logs purpose only
             content_preview = sanitize_history(last_messages)
             content_preview = json.dumps(content_preview[-10:], indent=2)
             logger.info(f"📝 Content preview: {content_preview}")
 
-        messages = [{"role": "system", "content": formatted_prompt}] + last_messages
+        messages = [SystemMessage(content=system_prompt)] + last_messages
 
         logger.info("=" * 80)
 
         msg = llm_with_tools.invoke(messages)
-
-        # logger.info(f"✅ LLM RESPONSE RECEIVED: {sanitize_history([msg])}")
-        # logger.info(f"📊 Response type: {msg.__class__.__name__}")
 
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             logger.info(f"🔧 Tool calls made: {len(msg.tool_calls)}")
@@ -77,8 +62,6 @@ def agent_node_factory(llm_with_tools, system_prompt):
                 msg.content[:1000] + "..." if len(msg.content) > 1000 else msg.content
             )
             logger.info(f"📄 Response content: {content_preview}")
-            with open("D:\\Agentic AI\\core\\result.txt", "w", encoding="utf-8") as f:
-                f.write(content_preview)
 
         if hasattr(msg, "usage_metadata") and msg.usage_metadata:
             usage = msg.usage_metadata
@@ -89,7 +72,13 @@ def agent_node_factory(llm_with_tools, system_prompt):
 
         logger.info("=" * 80)
 
-        return {"messages": [msg]}
+        agent_message = AIMessage(
+            content=f"{msg.content}",
+            tool_calls=getattr(msg, "tool_calls", []),
+            name=agent_name,
+        )
+
+        return {"messages": [agent_message]}
 
     return agent_node
 
@@ -108,6 +97,8 @@ def route_after_human(state: State):
         return END
     last_ai_msg = messages[-2].name
 
-    if last_ai_msg == "communication_agent":
+    if last_ai_msg.lower() == "communication_agent":  # case sensitive fix
+        return last_ai_msg
+    elif last_ai_msg.lower() == "planning_agent":
         return last_ai_msg
     return END

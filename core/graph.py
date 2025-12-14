@@ -1,4 +1,4 @@
-from langchain_core.messages import SystemMessage, trim_messages
+from langchain_core.messages import SystemMessage, trim_messages, AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
 
@@ -25,9 +25,11 @@ def build_graph(tool_sets, checkpointer):
     supervisor_llm = build_llm_with_tools([])
 
     communication_agent_node = agent_node_factory(
-        communication_llm, COMMUNICATION_SYSTEM_PROMPT
+        communication_llm, COMMUNICATION_SYSTEM_PROMPT, "communication Agent"
     )
-    planning_agent_node = agent_node_factory(planning_llm, PLANNING_SYSTEM_PROMPT)
+    planning_agent_node = agent_node_factory(
+        planning_llm, PLANNING_SYSTEM_PROMPT, "planning Agent"
+    )
 
     def supervisor_node(state: State):
         request_counter["count"] += 1
@@ -41,7 +43,7 @@ def build_graph(tool_sets, checkpointer):
 
         last_messages = trim_messages(
             state["messages"],
-            max_tokens=2000,
+            max_tokens=100090,
             strategy="last",
             token_counter=count_tokens,
             include_system=True,
@@ -62,21 +64,33 @@ def build_graph(tool_sets, checkpointer):
             logger.info("=" * 80)
             logger.info(f"➡ Routing to: {response.step}")
 
-            return {"next": response.step}
+            supervisor_message = AIMessage(
+                content=f"[SUPERVISOR ROUTING] Delegating task to: {response.step}",
+                name="supervisor",
+            )
+
+            return {
+                "next": response.step,
+                "messages": [supervisor_message],
+            }
 
         except Exception as e:
             logger.warning(f"⚠️ Structured output failed: {e}")
-            state["messages"].append(
-                SystemMessage(
-                    content=f"⚠️ Structured output failed: {e}, defaulting to FINISH"
-                )
+
+            error_message = AIMessage(
+                content=f"[SUPERVISOR ERROR] Routing failed: {e}. Defaulting to FINISH.",
+                name="supervisor",
             )
+
             response = Route(step="FINISH")
 
             logger.info("=" * 80)
             logger.info(f"➡ Routing to (fallback): {response.step}")
 
-            return {"next": response.step}
+            return {
+                "next": response.step,
+                "messages": [error_message],
+            }
 
     builder = StateGraph(State)
 
@@ -135,6 +149,7 @@ def build_graph(tool_sets, checkpointer):
         {
             "communication_agent": "communication_agent",
             "planning_agent": "planning_agent",
+            END: END,
         },
     )
 
