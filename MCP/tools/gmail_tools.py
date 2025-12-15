@@ -143,10 +143,9 @@ def _format_gmail_results_plain(
 @communication_server.tool()
 async def search_gmail_messages(
     query: str,
-    user_google_email: str,
     page_size: int = 10,
     page_token: Optional[str] = None,
-) -> str:
+) -> dict[str, Any]:
     """
     Searches messages in a user's Gmail account based on a query.
     Returns both Message IDs and Thread IDs for each found message, along with Gmail web interface links for manual verification.
@@ -207,7 +206,6 @@ async def send_email_tool(
 ) -> dict[str, Any]:
     """Send an email via Gmail.
 
-
     Args:
         recipient_id: Recipient's email address
         subject: Email subject line
@@ -264,12 +262,12 @@ async def open_email_tool(email_id: str) -> dict[str, Any]:
 
 @communication_server.tool()
 async def get_unread_emails_tool(
-    date: int = 10, max_results: int = 20
+    date: int = 7, max_results: int = 20
 ) -> dict[str, Any]:
     """Fetch recent unread emails from the primary inbox.
 
     Args:
-        date: Look back this many days (default: 10)
+        date: Look back this many days (default: 7)
         max_results: Maximum emails to return (default: 20)
 
     Returns:
@@ -342,7 +340,7 @@ async def get_unread_emails_tool(
 
 @communication_server.tool()
 async def read_email_tool(email_id: str) -> dict[str, Any]:
-    """Read the full content of a specific email and mark it as read.
+    """Read the full content of a specific email and mark it as read. Use when user asks for complete details.
 
     Args:
         email_id: The unique Gmail message ID
@@ -362,14 +360,11 @@ async def read_email_tool(email_id: str) -> dict[str, Any]:
             .execute
         )
 
-        # Decode the base64URL encoded raw content
         raw_data = msg["raw"]
         decoded_data = base64.urlsafe_b64decode(raw_data)
 
-        # Parse the RFC 2822 email
         mime_message = message_from_bytes(decoded_data)
 
-        # Extract the email body
         body = None
         if mime_message.is_multipart():
             for part in mime_message.walk():
