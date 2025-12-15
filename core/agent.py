@@ -57,7 +57,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         else:
             logger.info("💭 No tool calls - Direct response")
 
-        if hasattr(msg, "content") and msg.content:
+        if hasattr(msg, "content") and msg.content and not msg.tool_calls:
             content_preview = (
                 msg.content[:1000] + "..." if len(msg.content) > 1000 else msg.content
             )
@@ -71,6 +71,12 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             logger.info(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
 
         logger.info("=" * 80)
+
+        if hasattr(msg, "tool_calls") and msg.tool_calls:  # prevent hallucination
+            logger.info(
+                "🔧 Tool call detected - STRIPPING content to prevent hallucination"
+            )
+            msg.content = ""
 
         agent_message = AIMessage(
             content=f"{msg.content}",

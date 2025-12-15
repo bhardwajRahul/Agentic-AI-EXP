@@ -1,30 +1,26 @@
+"""Refactored Gmail API Tools - Best Practices Version"""
+
 import asyncio
 import base64
 import logging
-import sys
 import webbrowser
-from base64 import urlsafe_b64decode
 from datetime import datetime, timedelta
 from email import message_from_bytes
 from email.header import decode_header
 from email.message import EmailMessage
 from pathlib import Path
+from typing import Any
 
 from googleapiclient.errors import HttpError
 
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.server_init import communication_server
 
-root_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(root_dir))
-
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
-# auth
 def get_service():
-    """Get Gmail service using shared auth"""
+    """Get Gmail service using shared authentication."""
     base_dir = Path(__file__).parent.parent
     token_path = str(base_dir / "cred" / "gmail_token.json")
     creds_path = str(base_dir / "cred" / "setup_cred.json")
@@ -38,7 +34,7 @@ def get_service():
 
 
 def decode_mime_header(header: str) -> str:
-    """Helper function to decode encoded email headers"""
+    """Decode MIME-encoded email headers."""
     decoded_parts = decode_header(header)
     decoded_string = ""
     for part, encoding in decoded_parts:
@@ -50,34 +46,24 @@ def decode_mime_header(header: str) -> str:
 
 
 async def get_user_email(service) -> str:
-    """Get the authenticated user's email address"""
+    """Get the authenticated user's email address."""
     profile = await asyncio.to_thread(service.users().getProfile(userId="me").execute)
     return profile.get("emailAddress", "")
 
 
 @communication_server.tool()
-async def send_email_tool(recipient_id: str, subject: str, message: str):
-    """
-    description="Send an email to a recipient."
+async def send_email_tool(
+    recipient_id: str, subject: str, message: str
+) -> dict[str, Any]:
+    """Send an email via Gmail.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "recipient_id": {
-                "type": "string",
-                "description": "Recipient's email address (e.g., user@example.com)."
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line."
-            },
-            "message": {
-                "type": "string",
-                "description": "Email body content (plain text or HTML)."
-            }
-        },
-        "required": ["recipient_id", "subject", "message"]
-    }
+    Args:
+        recipient_id: Recipient's email address
+        subject: Email subject line
+        message: Email body content (plain text or HTML)
+
+    Returns:
+        Dict with 'success' boolean, 'message_id' if successful, or 'error' message
     """
     try:
         service = get_service()
@@ -96,53 +82,50 @@ async def send_email_tool(recipient_id: str, subject: str, message: str):
             service.users().messages().send(userId="me", body=create_message).execute
         )
 
-        logger.info(f"Message sent: {send_message['id']}")
-        return {"status": "success", "message_id": send_message["id"]}
+        logger.info(f"Email sent successfully: {send_message['id']}")
+        return {"success": True, "message_id": send_message["id"]}
+    except HttpError as error:
+        logger.error(f"Gmail API error: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Send email error: {str(error)}")
-        return {"status": "error", "error_message": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def open_email_tool(email_id: str):
-    """
-    description="Open a specific email in the browser using its Gmail web interface."
+async def open_email_tool(email_id: str) -> dict[str, Any]:
+    """Open a specific email in Gmail web interface.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID."
-            }
-        },
-        "required": ["email_id"]
-    }
+    Args:
+        email_id: The unique Gmail message ID
+
+    Returns:
+        Dict with 'success' boolean or 'error' message
     """
     try:
         url = f"https://mail.google.com/#all/{email_id}"
         webbrowser.open(url, new=0, autoraise=True)
-        return {"status": "success", "message": "Email opened in browser successfully."}
+        return {"success": True}
     except Exception as error:
-        logger.error(f"Open email error: {str(error)}")
-        return {"status": "error", "error_message": str(error)}
+        logger.error(f"Open email error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def get_unread_emails_tool(date=10, max_results=20):
-    """
-    description="Fetch unread Gmail emails from the last 'n' days."
+async def get_unread_emails_tool(
+    date: int = 10, max_results: int = 20
+) -> dict[str, Any]:
+    """Fetch recent unread emails from the primary inbox.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "date": {
-                "type": "integer",
-                "description": "Number of days to look back for unread emails (default: 10)."
-            }
-        },
-        "required": []
-    }
+    Args:
+        date: Look back this many days (default: 10)
+        max_results: Maximum emails to return (default: 20)
+
+    Returns:
+        Dict with 'count' and 'emails' list containing email metadata
+
+    Note:
+        Only searches the primary inbox category to avoid clutter.
     """
     try:
         service = get_service()
@@ -177,11 +160,11 @@ async def get_unread_emails_tool(date=10, max_results=20):
 
                 email_details = {
                     "id": email_id,
-                    "threadId": msg["threadId"],
+                    "thread_id": msg["threadId"],
                     "snippet": full_msg.get("snippet", ""),
                     "labels": full_msg.get("labelIds", []),
                     "size": full_msg.get("sizeEstimate", 0),
-                    "internalDate": full_msg.get("internalDate"),
+                    "internal_date": full_msg.get("internalDate"),
                     "subject": next(
                         (h["value"] for h in headers if h["name"] == "Subject"),
                         "No Subject",
@@ -198,26 +181,26 @@ async def get_unread_emails_tool(date=10, max_results=20):
                 messages.append(email_details)
 
         return {"count": len(messages), "emails": messages}
+    except HttpError as error:
+        logger.error(f"Failed to fetch unread emails: {error}")
+        return {"error": str(error)}
     except Exception as error:
-        logger.error(f"Get unread emails error: {str(error)}")
+        logger.error(f"Unexpected error: {error}")
         return {"error": str(error)}
 
 
 @communication_server.tool()
-async def read_email_tool(email_id: str):
-    """
-    description="Read the full content of a specific email by its ID. Use this after getting unread emails to view the complete message."
+async def read_email_tool(email_id: str) -> dict[str, Any]:
+    """Read the full content of a specific email and mark it as read.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID (from get_unread_emails_tool or search results)."
-            }
-        },
-        "required": ["email_id"]
-    }
+    Args:
+        email_id: The unique Gmail message ID
+
+    Returns:
+        Dict with email content, subject, from, to, date fields
+
+    Note:
+        Automatically marks the email as read after fetching.
     """
     try:
         service = get_service()
@@ -230,7 +213,7 @@ async def read_email_tool(email_id: str):
 
         # Decode the base64URL encoded raw content
         raw_data = msg["raw"]
-        decoded_data = urlsafe_b64decode(raw_data)
+        decoded_data = base64.urlsafe_b64decode(raw_data)
 
         # Parse the RFC 2822 email
         mime_message = message_from_bytes(decoded_data)
@@ -264,57 +247,52 @@ async def read_email_tool(email_id: str):
         )
 
         return email_metadata
+    except HttpError as error:
+        logger.error(f"Failed to read email {email_id}: {error}")
+        return {"error": str(error)}
     except Exception as error:
-        logger.error(f"Read email error: {str(error)}")
+        logger.error(f"Unexpected error: {error}")
         return {"error": str(error)}
 
 
 @communication_server.tool()
-async def trash_email_tool(email_id: str):
-    """
-    description="Move an email to trash. Always confirm with user before trashing any email."
+async def trash_email_tool(email_id: str) -> dict[str, Any]:
+    """Move an email to trash.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID to move to trash."
-            }
-        },
-        "required": ["email_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+
+    Warning:
+        Always confirm with user before trashing emails.
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
             service.users().messages().trash(userId="me", id=email_id).execute
         )
-        logger.info(f"Email moved to trash: {email_id}")
-        return {"status": "success", "message": "Email moved to trash successfully."}
+        logger.info(f"Email trashed: {email_id}")
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to trash email: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Trash email error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def mark_email_as_read_tool(email_id: str):
-    """
-    description="Mark a specific email as read to remove the unread status."
+async def mark_email_as_read_tool(email_id: str) -> dict[str, Any]:
+    """Mark a specific email as read to remove the unread status.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID to mark as read."
-            }
-        },
-        "required": ["email_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID to mark as read
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -324,37 +302,32 @@ async def mark_email_as_read_tool(email_id: str):
             .execute
         )
         logger.info(f"Email marked as read: {email_id}")
-        return {"status": "success", "message": "Email marked as read."}
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to mark as read: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Mark as read error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def create_draft_tool(recipient_id: str, subject: str, message: str):
-    """
-    description="Create a draft email without sending it. Use this when user wants to draft an email for later review."
+async def create_draft_tool(
+    recipient_id: str, subject: str, message: str
+) -> dict[str, Any]:
+    """Create a draft email without sending it.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "recipient_id": {
-                "type": "string",
-                "description": "Recipient's email address (e.g., user@example.com)."
-            },
-            "subject": {
-                "type": "string",
-                "description": "Email subject line."
-            },
-            "message": {
-                "type": "string",
-                "description": "Email body content (plain text or HTML)."
-            }
-        },
-        "required": ["recipient_id", "subject", "message"]
-    }
-    """
+    Args:
+        recipient_id: Recipient's email address (e.g., user@example.com)
+        subject: Email subject line
+        message: Email body content (plain text or HTML)
 
+    Returns:
+        Dict with 'success' boolean, 'draft_id' if successful, or 'error' message
+
+    Note:
+        Use this when user wants to draft an email for later review.
+    """
     try:
         service = get_service()
         user_email = await get_user_email(service)
@@ -376,22 +349,21 @@ async def create_draft_tool(recipient_id: str, subject: str, message: str):
         )
 
         logger.info(f"Draft created: {draft['id']}")
-        return {"status": "success", "draft_id": draft["id"]}
+        return {"success": True, "draft_id": draft["id"]}
+    except HttpError as error:
+        logger.error(f"Failed to create draft: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Create draft error: {str(error)}")
-        return {"status": "error", "error_message": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def list_drafts_tool():
-    """
-    description="List all draft emails in the user's mailbox."
+async def list_drafts_tool() -> dict[str, Any]:
+    """List all draft emails in the user's mailbox.
 
-    schema={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
+    Returns:
+        Dict with 'count' and 'drafts' list containing draft metadata
     """
     try:
         service = get_service()
@@ -422,23 +394,24 @@ async def list_drafts_tool():
             draft_list.append({"id": draft_id, "subject": subject, "to": to})
 
         return {"count": len(draft_list), "drafts": draft_list}
+    except HttpError as error:
+        logger.error(f"Failed to list drafts: {error}")
+        return {"error": str(error)}
     except Exception as error:
-        logger.error(f"List drafts error: {str(error)}")
+        logger.error(f"Unexpected error: {error}")
         return {"error": str(error)}
 
 
 @communication_server.tool()
-async def list_labels_tool():
-    """
-    description="List all labels (tags/folders) available in the user's Gmail mailbox."
+async def list_labels_tool() -> dict[str, Any]:
+    """List all labels (tags/folders) in the user's Gmail mailbox.
 
-    schema={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
-    """
+    Returns:
+        Dict with 'count' and 'labels' list containing id, name, and type
 
+    Note:
+        Includes both system labels (INBOX, SENT) and user-created labels.
+    """
     try:
         service = get_service()
         results = await asyncio.to_thread(
@@ -446,39 +419,34 @@ async def list_labels_tool():
         )
         labels = results.get("labels", [])
 
-        label_list = []
-        for label in labels:
-            label_list.append(
-                {
-                    "id": label["id"],
-                    "name": label["name"],
-                    "type": label.get("type", "user"),
-                }
-            )
+        label_list = [
+            {
+                "id": label["id"],
+                "name": label["name"],
+                "type": label.get("type", "user"),
+            }
+            for label in labels
+        ]
 
         return {"count": len(label_list), "labels": label_list}
+    except HttpError as error:
+        logger.error(f"Failed to list labels: {error}")
+        return {"error": str(error)}
     except Exception as error:
-        logger.error(f"List labels error: {str(error)}")
+        logger.error(f"Unexpected error: {error}")
         return {"error": str(error)}
 
 
 @communication_server.tool()
-async def create_label_tool(name: str):
-    """
-    description="Create a new label (tag/folder) in Gmail for organizing emails."
+async def create_label_tool(name: str) -> dict[str, Any]:
+    """Create a new label (tag/folder) in Gmail for organizing emails.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "The name of the new label to create."
-            }
-        },
-        "required": ["name"]
-    }
-    """
+    Args:
+        name: The name of the new label to create
 
+    Returns:
+        Dict with 'success' boolean, 'label_id' and 'name' if successful, or 'error' message
+    """
     try:
         service = get_service()
         label_object = {
@@ -493,36 +461,29 @@ async def create_label_tool(name: str):
 
         logger.info(f"Label created: {created_label['id']}")
         return {
-            "status": "success",
+            "success": True,
             "label_id": created_label["id"],
             "name": created_label["name"],
         }
+    except HttpError as error:
+        logger.error(f"Failed to create label: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Create label error: {str(error)}")
-        return {"status": "error", "error_message": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def apply_label_tool(email_id: str, label_id: str):
-    """
-    description="Apply a label (tag) to a specific email for organization."
+async def apply_label_tool(email_id: str, label_id: str) -> dict[str, Any]:
+    """Apply a label (tag) to a specific email for organization.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID."
-            },
-            "label_id": {
-                "type": "string",
-                "description": "The label ID to apply (from list_labels_tool)."
-            }
-        },
-        "required": ["email_id", "label_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID
+        label_id: The label ID to apply (from list_labels_tool)
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -533,33 +494,26 @@ async def apply_label_tool(email_id: str, label_id: str):
         )
 
         logger.info(f"Label {label_id} applied to email {email_id}")
-        return {"status": "success", "message": "Label applied successfully to email."}
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to apply label: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Apply label error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def remove_labels_tool(email_id: str, label_id: str):
-    """
-    description="Remove a label (tag) from a specific email."
+async def remove_labels_tool(email_id: str, label_id: str) -> dict[str, Any]:
+    """Remove a label (tag) from a specific email.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID."
-            },
-            "label_id": {
-                "type": "string",
-                "description": "The label ID to remove (from list_labels_tool)."
-            }
-        },
-        "required": ["email_id", "label_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID
+        label_id: The label ID to remove (from list_labels_tool)
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -570,32 +524,25 @@ async def remove_labels_tool(email_id: str, label_id: str):
         )
 
         logger.info(f"Label {label_id} removed from email {email_id}")
-        return {
-            "status": "success",
-            "message": "Label removed successfully from email.",
-        }
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to remove label: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Remove label error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def search_by_label_tool(label_id: str):
-    """
-    description="Search for all emails that have a specific label applied."
+async def search_by_label_tool(label_id: str) -> dict[str, Any]:
+    """Search for all emails that have a specific label applied.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "label_id": {
-                "type": "string",
-                "description": "The label ID to search for (from list_labels_tool)."
-            }
-        },
-        "required": ["label_id"]
-    }
-    """
+    Args:
+        label_id: The label ID to search for (from list_labels_tool)
 
+    Returns:
+        List of message IDs with the label
+    """
     try:
         service = get_service()
         query = f"label:{label_id}"
@@ -618,9 +565,13 @@ async def search_by_label_tool(label_id: str):
             )
             messages.extend(response["messages"])
 
-        return messages
+        return {"count": len(messages), "messages": messages}
     except HttpError as error:
-        return f"An HttpError occurred: {str(error)}"
+        logger.error(f"Search by label failed: {error}")
+        return {"error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"error": str(error)}
 
 
 """This tool is not working with the Gmail API but there is a way using the google.auth"""
@@ -655,44 +606,40 @@ async def search_by_label_tool(label_id: str):
 
 
 @communication_server.tool()
-async def list_filters_tool():
-    """
-    description="List all email filters configured in the user's Gmail account."
+async def list_filters_tool() -> dict[str, Any]:
+    """List all email filters configured in Gmail.
 
-    schema={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
+    Returns:
+        Dict with 'filters' list or 'error' message
+
+    Note:
+        Filters are rules that automatically organize incoming emails.
     """
     try:
         service = get_service()
         results = await asyncio.to_thread(
             service.users().settings().filters().list(userId="me").execute
         )
-        filters = results.get("filter", [])
-        return filters
+        filters = results.get("filters", [])
+        return {"count": len(filters), "filters": filters}
     except HttpError as error:
-        return f"An HttpError occurred: {str(error)}"
+        logger.error(f"Failed to list filters: {error}")
+        return {"error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"error": str(error)}
 
 
 @communication_server.tool()
-async def get_filter_tool(filter_id: str):
-    """
-    description="Get detailed information about a specific email filter by its ID."
+async def get_filter_tool(filter_id: str) -> dict[str, Any]:
+    """Get detailed information about a specific email filter by its ID.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "filter_id": {
-                "type": "string",
-                "description": "The filter ID to retrieve (from list_filters_tool)."
-            }
-        },
-        "required": ["filter_id"]
-    }
-    """
+    Args:
+        filter_id: The filter ID to retrieve (from list_filters_tool)
 
+    Returns:
+        Filter configuration details or error message
+    """
     try:
         service = get_service()
         filter_data = await asyncio.to_thread(
@@ -700,26 +647,23 @@ async def get_filter_tool(filter_id: str):
         )
         return filter_data
     except HttpError as error:
-        return f"An HttpError occurred: {str(error)}"
+        logger.error(f"Failed to get filter: {error}")
+        return {"error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"error": str(error)}
 
 
 @communication_server.tool()
-async def delete_filter_tool(filter_id: str):
-    """
-    description="Delete a specific email filter by its ID."
+async def delete_filter_tool(filter_id: str) -> dict[str, Any]:
+    """Delete a specific email filter by its ID.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "filter_id": {
-                "type": "string",
-                "description": "The filter ID to delete (from list_filters_tool)."
-            }
-        },
-        "required": ["filter_id"]
-    }
-    """
+    Args:
+        filter_id: The filter ID to delete (from list_filters_tool)
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -727,33 +671,37 @@ async def delete_filter_tool(filter_id: str):
             .settings()
             .filters()
             .delete(userId="me", id=filter_id)
-            .execute()
+            .execute
         )
         logger.info(f"Filter deleted: {filter_id}")
-        return "Filter deleted successfully."
+        return {"success": True}
     except HttpError as error:
-        return f"An HttpError occurred: {str(error)}"
+        logger.error(f"Failed to delete filter: {error}")
+        return {"success": False, "error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def search_emails_tool(query: str, max_results: int | None = None):
-    """
-    description="Search for emails using Gmail's advanced search syntax. Supports queries like 'from:sender@example.com subject:invoice after:2025/01/01 has:attachment'."
+async def search_emails_tool(
+    query: str, max_results: int | None = None
+) -> dict[str, Any]:
+    """Search emails using Gmail's query syntax.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Gmail search query using syntax (from:, subject:, after:, before:, has:attachment, etc.)."
-            },
-            "max_results": {
-                "type": "integer",
-                "description": "Maximum number of emails to return (optional)."
-            }
-        },
-        "required": ["query"]
-    }
+    Args:
+        query: Gmail search query (supports from:, subject:, after:, has:attachment, etc.)
+        max_results: Maximum number of results to return (optional)
+
+    Returns:
+        Dict with 'count' and 'emails' list
+
+    Examples:
+        - "from:boss@company.com subject:urgent"
+        - "has:attachment after:2024/01/01"
+        - "is:unread from:newsletter@site.com"
+
+    See: https://support.google.com/mail/answer/7190
     """
     try:
         service = get_service()
@@ -801,7 +749,7 @@ async def search_emails_tool(query: str, max_results: int | None = None):
             result_messages.append(
                 {
                     "id": msg["id"],
-                    "threadId": msg["threadId"],
+                    "thread_id": msg["threadId"],
                     "subject": subject,
                     "from": sender,
                     "date": date,
@@ -810,28 +758,27 @@ async def search_emails_tool(query: str, max_results: int | None = None):
             )
 
         return {"count": len(result_messages), "emails": result_messages}
+    except HttpError as error:
+        logger.error(f"Search failed for query '{query}': {error}")
+        return {"error": str(error)}
     except Exception as error:
-        logger.error(f"Search emails error: {str(error)}")
+        logger.error(f"Unexpected error: {error}")
         return {"error": str(error)}
 
 
 @communication_server.tool()
-async def create_folder_tool(name: str):
-    """
-    description="Create a new folder in Gmail. Note: In Gmail, folders are implemented as labels with special handling."
+async def create_folder_tool(name: str) -> dict[str, Any]:
+    """Create a new folder in Gmail.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "name": {
-                "type": "string",
-                "description": "The name of the new folder to create."
-            }
-        },
-        "required": ["name"]
-    }
-    """
+    Args:
+        name: The name of the new folder to create
 
+    Returns:
+        Dict with 'success' boolean, 'folder_id' and 'name' if successful, or 'error' message
+
+    Note:
+        In Gmail, folders are implemented as labels with special handling.
+    """
     try:
         service = get_service()
         label_object = {
@@ -847,36 +794,35 @@ async def create_folder_tool(name: str):
 
         logger.info(f"Folder created: {created_label['id']}")
         return {
-            "status": "success",
+            "success": True,
             "folder_id": created_label["id"],
             "name": created_label["name"],
         }
+    except HttpError as error:
+        logger.error(f"Failed to create folder: {error}")
+        return {"success": False, "error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
         logger.error(f"Create folder error: {str(error)}")
         return {"status": "error", "error_message": str(error)}
 
 
 @communication_server.tool()
-async def move_to_folder_tool(email_id: str, folder_id: str):
-    """
-    description="Move an email to a specific folder (applies folder label and removes from inbox)."
+async def move_to_folder_tool(email_id: str, folder_id: str) -> dict[str, Any]:
+    """Move an email to a specific folder.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID."
-            },
-            "folder_id": {
-                "type": "string",
-                "description": "The folder ID (label ID) to move the email to."
-            }
-        },
-        "required": ["email_id", "folder_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID
+        folder_id: The folder ID (label ID) to move the email to
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+
+    Note:
+        This applies folder label and removes from inbox.
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -891,24 +837,22 @@ async def move_to_folder_tool(email_id: str, folder_id: str):
         )
 
         logger.info(f"Email {email_id} moved to folder {folder_id}")
-        return {"status": "success", "message": "Email moved to folder successfully."}
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to move to folder: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Move to folder error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def list_folders_tool():
-    """
-    description="List all user-created folders in Gmail."
+async def list_folders_tool() -> dict[str, Any]:
+    """List all user-created folders in Gmail.
 
-    schema={
-        "type": "object",
-        "properties": {},
-        "required": []
-    }
+    Returns:
+        Dict with 'count' and 'folders' list containing user-created labels
     """
-
     try:
         service = get_service()
         results = await asyncio.to_thread(
@@ -924,30 +868,24 @@ async def list_folders_tool():
         ]
 
         return {"count": len(folders), "folders": folders}
+    except HttpError as error:
+        logger.error(f"Failed to list folders: {error}")
+        return {"error": str(error)}
     except Exception as error:
-        logger.error(f"List folders error: {str(error)}")
+        logger.error(f"Unexpected error: {error}")
         return {"error": str(error)}
 
 
 @communication_server.tool()
-async def rename_labels_tool(label_id: str, new_name: str):
-    """
-    description="Rename an existing label to a new name."
+async def rename_labels_tool(label_id: str, new_name: str) -> dict[str, Any]:
+    """Rename an existing label to a new name.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "label_id": {
-                "type": "string",
-                "description": "The label ID to rename (from list_labels_tool)."
-            },
-            "new_name": {
-                "type": "string",
-                "description": "The new name for the label."
-            }
-        },
-        "required": ["label_id", "new_name"]
-    }
+    Args:
+        label_id: The label ID to rename (from list_labels_tool)
+        new_name: The new name for the label
+
+    Returns:
+        Dict with 'success' boolean, 'label_id' and 'name' if successful, or 'error' message
     """
     try:
         service = get_service()
@@ -969,6 +907,17 @@ async def rename_labels_tool(label_id: str, new_name: str):
 
         logger.info(f"Label renamed: {label_id} to {new_name}")
         return {
+            "success": True,
+            "label_id": updated_label["id"],
+            "name": updated_label["name"],
+        }
+    except HttpError as error:
+        logger.error(f"Failed to rename label: {error}")
+        return {"success": False, "error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
+        return {
             "status": "success",
             "label_id": updated_label["id"],
             "name": updated_label["name"],
@@ -979,22 +928,18 @@ async def rename_labels_tool(label_id: str, new_name: str):
 
 
 @communication_server.tool()
-async def delete_label_tool(label_id: str):
-    """
-    description="Permanently delete a label from Gmail. This action cannot be undone."
+async def delete_label_tool(label_id: str) -> dict[str, Any]:
+    """Permanently delete a label from Gmail.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "label_id": {
-                "type": "string",
-                "description": "The label ID to delete (from list_labels_tool)."
-            }
-        },
-        "required": ["label_id"]
-    }
-    """
+    Args:
+        label_id: The label ID to delete (from list_labels_tool)
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+
+    Warning:
+        This action cannot be undone.
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -1002,29 +947,28 @@ async def delete_label_tool(label_id: str):
         )
 
         logger.info(f"Label deleted: {label_id}")
-        return {"status": "success", "message": "Label deleted successfully."}
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to delete label: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Delete label error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def archive_email_tool(email_id: str):
-    """
-    description="Archive a single email (removes from inbox without deleting, keeps in 'All Mail')."
+async def archive_email_tool(email_id: str) -> dict[str, Any]:
+    """Archive a single email.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID to archive."
-            }
-        },
-        "required": ["email_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID to archive
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+
+    Note:
+        Removes from inbox without deleting, keeps in 'All Mail'.
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -1035,35 +979,31 @@ async def archive_email_tool(email_id: str):
         )
 
         logger.info(f"Email archived: {email_id}")
-        return {"status": "success", "message": "Email archived successfully."}
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to archive email: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Archive email error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def batch_archive_tool(query: str, max_emails: int = 100):
-    """
-    description="Archive multiple emails matching a Gmail search query. Use Gmail search syntax to specify which emails to archive."
+async def batch_archive_tool(query: str, max_emails: int = 100) -> dict[str, Any]:
+    """Archive multiple emails matching a Gmail search query.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "query": {
-                "type": "string",
-                "description": "Gmail search query to find emails to archive (e.g., 'from:sender older_than:30d')."
-            },
-            "max_emails": {
-                "type": "integer",
-                "description": "Maximum number of emails to archive (default: 100)."
-            }
-        },
-        "required": ["query"]
-    }
+    Args:
+        query: Gmail search query to find emails to archive (e.g., 'from:sender older_than:30d')
+        max_emails: Maximum number of emails to archive (default: 100)
+
+    Returns:
+        Dict with 'success' boolean, 'archived_count', or 'error' message
+
+    Note:
+        Use Gmail search syntax to specify which emails to archive.
     """
     try:
         service = get_service()
-        # First, search for emails matching the query
         user_id = "me"
 
         response = await asyncio.to_thread(
@@ -1079,7 +1019,7 @@ async def batch_archive_tool(query: str, max_emails: int = 100):
 
         if not messages:
             return {
-                "status": "success",
+                "success": True,
                 "archived_count": 0,
                 "message": "No emails found matching the query.",
             }
@@ -1100,62 +1040,53 @@ async def batch_archive_tool(query: str, max_emails: int = 100):
                 )
                 archived_count += 1
             except Exception as e:
-                logger.error(f"Error archiving email {msg['id']}: {str(e)}")
+                logger.error(f"Error archiving email {msg['id']}: {e}")
 
         logger.info(f"Batch archived {archived_count} emails")
         return {
-            "status": "success",
+            "success": True,
             "archived_count": archived_count,
             "total_found": len(messages),
-            "message": f"Successfully archived {archived_count} out of {len(messages)} emails.",
         }
     except HttpError as error:
-        return {"status": "error", "error_message": str(error)}
+        logger.error(f"Batch archive failed: {error}")
+        return {"success": False, "error": str(error)}
+    except Exception as error:
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
 
 
 @communication_server.tool()
-async def list_archived_tool(max_results: int = 100):
-    """
-    description="List archived emails (emails not in inbox but still in 'All Mail')."
+async def list_archived_tool(max_results: int = 100) -> dict[str, Any]:
+    """List archived emails.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "max_results": {
-                "type": "integer",
-                "description": "Maximum number of archived emails to return (default: 100)."
-            }
-        },
-        "required": []
-    }
+    Args:
+        max_results: Maximum number of archived emails to return (default: 100)
+
+    Returns:
+        Dict with 'count' and 'emails' list or 'error' message
+
+    Note:
+        Emails not in inbox but still in 'All Mail'.
     """
     try:
-        service = get_service()
-        # Search for emails that are in "All Mail" but not in "Inbox"
         query = "-in:inbox"
-        # Use the existing search_emails method
-        return await search_emails_tool(service, query, max_results)
+        return await search_emails_tool(query, max_results)
     except Exception as error:
-        return f"An error occurred: {str(error)}"
+        logger.error(f"Failed to list archived emails: {error}")
+        return {"error": str(error)}
 
 
 @communication_server.tool()
-async def restore_to_inbox_tool(email_id: str):
-    """
-    description="Restore an archived email back to the inbox."
+async def restore_to_inbox_tool(email_id: str) -> dict[str, Any]:
+    """Restore an archived email back to the inbox.
 
-    schema={
-        "type": "object",
-        "properties": {
-            "email_id": {
-                "type": "string",
-                "description": "The unique Gmail message ID to restore to inbox."
-            }
-        },
-        "required": ["email_id"]
-    }
-    """
+    Args:
+        email_id: The unique Gmail message ID to restore to inbox
 
+    Returns:
+        Dict with 'success' boolean or 'error' message
+    """
     try:
         service = get_service()
         await asyncio.to_thread(
@@ -1166,7 +1097,10 @@ async def restore_to_inbox_tool(email_id: str):
         )
 
         logger.info(f"Email restored to inbox: {email_id}")
-        return {"status": "success", "message": "Email restored to inbox successfully."}
+        return {"success": True}
+    except HttpError as error:
+        logger.error(f"Failed to restore to inbox: {error}")
+        return {"success": False, "error": str(error)}
     except Exception as error:
-        logger.error(f"Restore to inbox error: {str(error)}")
-        return {"error": str(error)}
+        logger.error(f"Unexpected error: {error}")
+        return {"success": False, "error": str(error)}
