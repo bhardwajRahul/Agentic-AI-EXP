@@ -296,3 +296,261 @@ class SearchByLabelResponse(BaseModel):
     count: int
     messages: List[dict]
     error: Optional[str] = None
+
+
+# ============================Google Chat Models=========================
+
+
+class ListSpacesRequest(BaseModel):
+    """List Google Chat spaces request"""
+
+    page_size: int = Field(100, ge=1, le=1000, description="Max number of spaces")
+    space_type: str = Field(
+        "all",
+        description="Type of spaces: 'all', 'room', or 'dm'",
+        pattern="^(all|room|dm)$",
+    )
+
+
+class SpaceInfo(BaseModel):
+    """Google Chat space information"""
+
+    name: str
+    display_name: str
+    space_type: str
+
+
+class ListSpacesResponse(BaseModel):
+    """List spaces response"""
+
+    count: int
+    spaces: List[SpaceInfo]
+    space_type_filter: str
+    error: Optional[str] = None
+
+
+class GetMessagesRequest(BaseModel):
+    """Get messages from a space request"""
+
+    space_id: str = Field(..., min_length=1, description="Space ID (spaces/...)")
+    page_size: int = Field(50, ge=1, le=1000, description="Max number of messages")
+    order_by: str = Field(
+        "createTime desc",
+        description="Sort order for messages",
+        pattern="^createTime (asc|desc)$",
+    )
+
+
+class MessageInfo(BaseModel):
+    """Google Chat message information"""
+
+    name: str
+    sender: str
+    create_time: str
+    text: str
+
+
+class GetMessagesResponse(BaseModel):
+    """Get messages response"""
+
+    count: int
+    space_name: str
+    space_id: str
+    messages: List[MessageInfo]
+    error: Optional[str] = None
+
+
+class SendMessageRequest(BaseModel):
+    """Send message to a space request"""
+
+    space_id: str = Field(..., min_length=1, description="Space ID (spaces/...)")
+    message_text: str = Field(
+        ..., min_length=1, max_length=4096, description="Message text content"
+    )
+    thread_key: Optional[str] = Field(
+        None, description="Optional thread key for replies"
+    )
+
+
+class SendMessageResponse(BaseModel):
+    """Send message response"""
+
+    success: bool
+    message_id: Optional[str] = None
+    space_id: Optional[str] = None
+    thread_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class SearchMessagesRequest(BaseModel):
+    """Search messages request"""
+
+    query: str = Field(..., min_length=1, description="Search query text")
+    space_id: Optional[str] = Field(
+        None, description="Optional space ID to limit search"
+    )
+    page_size: int = Field(25, ge=1, le=100, description="Max results per space")
+
+
+class SearchMessageInfo(BaseModel):
+    """Search result message information"""
+
+    sender: str
+    create_time: str
+    text: str
+    space_name: str
+
+
+class SearchMessagesResponse(BaseModel):
+    """Search messages response"""
+
+    count: int
+    query: str
+    context: str
+    messages: List[SearchMessageInfo]
+    error: Optional[str] = None
+
+
+# Google Calendar Models
+
+
+class CalendarInfo(BaseModel):
+    """Calendar information"""
+
+    id: str
+    summary: str
+    description: Optional[str] = None
+    timeZone: str
+    accessRole: str
+    primary: bool = False
+
+
+class ListCalendarsResponse(BaseModel):
+    """List calendars response"""
+
+    status: str
+    count: int
+    calendars: List[CalendarInfo]
+    error: Optional[str] = None
+
+
+class ReminderItem(BaseModel):
+    """Calendar reminder item"""
+
+    method: str = Field(..., pattern="^(popup|email)$", description="Reminder method")
+    minutes: int = Field(..., ge=0, le=40320, description="Minutes before event")
+
+
+class GetEventsRequest(BaseModel):
+    """Get events request"""
+
+    calendar_id: str = Field("primary", min_length=1, description="Calendar ID")
+    event_id: Optional[str] = Field(None, description="Specific event ID")
+    time_min: Optional[str] = Field(None, description="Start time (RFC3339)")
+    time_max: Optional[str] = Field(None, description="End time (RFC3339)")
+    max_results: int = Field(25, ge=1, le=2500, description="Max number of events")
+    query: Optional[str] = Field(None, description="Search query")
+    detailed: bool = Field(False, description="Return detailed information")
+    include_attachments: bool = Field(False, description="Include attachment info")
+
+
+class GetEventsResponse(BaseModel):
+    """Get events response"""
+
+    status: str
+    message: str
+    event_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class CreateEventRequest(BaseModel):
+    """Create event request"""
+
+    summary: str = Field(..., min_length=1, max_length=1024, description="Event title")
+    start_time: str = Field(..., min_length=1, description="Start time in IST")
+    end_time: str = Field(..., min_length=1, description="End time in IST")
+    calendar_id: str = Field("primary", min_length=1, description="Calendar ID")
+    description: Optional[str] = Field(
+        None, max_length=8192, description="Event description"
+    )
+    location: Optional[str] = Field(None, max_length=1024, description="Event location")
+    attendees: Optional[List[str]] = Field(None, description="Attendee emails")
+    attachments: Optional[List[str]] = Field(None, description="Drive file URLs/IDs")
+    add_google_meet: bool = Field(False, description="Add Google Meet link")
+    reminders: Optional[List[ReminderItem]] = Field(
+        None, max_items=5, description="Custom reminders"
+    )
+    use_default_reminders: bool = Field(True, description="Use default reminders")
+    transparency: Optional[str] = Field(
+        None, pattern="^(opaque|transparent)$", description="Busy/free status"
+    )
+
+    @validator("attendees")
+    def validate_attendees(cls, v):
+        if v and len(v) > 200:
+            raise ValueError("Maximum 200 attendees allowed")
+        return v
+
+
+class CreateEventResponse(BaseModel):
+    """Create event response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class ModifyEventRequest(BaseModel):
+    """Modify event request"""
+
+    event_id: str = Field(..., min_length=1, description="Event ID to modify")
+    calendar_id: str = Field("primary", min_length=1, description="Calendar ID")
+    summary: Optional[str] = Field(None, max_length=1024, description="New event title")
+    start_time: Optional[str] = Field(None, description="New start time in IST")
+    end_time: Optional[str] = Field(None, description="New end time in IST")
+    description: Optional[str] = Field(
+        None, max_length=8192, description="New description"
+    )
+    location: Optional[str] = Field(None, max_length=1024, description="New location")
+    attendees: Optional[List[str]] = Field(None, description="New attendee emails")
+    add_google_meet: Optional[bool] = Field(None, description="Add/remove Google Meet")
+    reminders: Optional[List[ReminderItem]] = Field(
+        None, max_items=5, description="New reminders"
+    )
+    use_default_reminders: Optional[bool] = Field(
+        None, description="Use default reminders"
+    )
+    transparency: Optional[str] = Field(
+        None, pattern="^(opaque|transparent)$", description="Busy/free status"
+    )
+
+    @validator("attendees")
+    def validate_attendees(cls, v):
+        if v and len(v) > 200:
+            raise ValueError("Maximum 200 attendees allowed")
+        return v
+
+
+class ModifyEventResponse(BaseModel):
+    """Modify event response"""
+
+    status: str
+    message: str
+    event_id: str
+    error: Optional[str] = None
+
+
+class DeleteEventRequest(BaseModel):
+    """Delete event request"""
+
+    event_id: str = Field(..., min_length=1, description="Event ID to delete")
+    calendar_id: str = Field("primary", min_length=1, description="Calendar ID")
+
+
+class DeleteEventResponse(BaseModel):
+    """Delete event response"""
+
+    status: str
+    message: str
+    event_id: str
+    error: Optional[str] = None
