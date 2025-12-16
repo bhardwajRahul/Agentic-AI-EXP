@@ -554,3 +554,6 @@ class DeleteEventResponse(BaseModel):
     message: str
     event_id: str
     error: Optional[str] = None
+
+
+# ========================= GDrive ==============================================

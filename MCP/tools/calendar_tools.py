@@ -19,7 +19,7 @@ from googleapiclient.errors import HttpError
 
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.planning_server import planning_server
-from MCP.utils.pydantic_models import (
+from MCP.helper.pydantic_models import (
     CalendarInfo,
     ListCalendarsResponse,
     GetEventsRequest,

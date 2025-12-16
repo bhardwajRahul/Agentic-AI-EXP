@@ -14,7 +14,7 @@ from googleapiclient.errors import HttpError
 
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.server_init import communication_server
-from MCP.utils.pydantic_models import (
+from MCP.helper.pydantic_models import (
     ListSpacesRequest,
     ListSpacesResponse,
     SpaceInfo,

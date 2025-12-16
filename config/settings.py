@@ -38,3 +38,5 @@ planning_config = {
         "args": [str(PLANNING_SERVER)],
     }
 }
+
+TRANSPORT_MODE = os.getenv("TRANSPORT_MODE", "stdio")  # Options: stdio, socket, http
