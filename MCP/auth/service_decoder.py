@@ -28,6 +28,10 @@ SCOPES = {
         "https://www.googleapis.com/auth/chat.messages",
         "https://www.googleapis.com/auth/chat.spaces",
     ],
+    "gdrive": [
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive.file",
+    ],
 }
 
 _service_cache: Dict[str, any] = {}
@@ -91,6 +95,7 @@ def get_google_service(
             token.write(creds.to_json())
 
     api_service_name = "chat" if service_type == "gchat" else service_type
+    api_service_name = "drive" if service_type == "gdrive" else service_type
     version = "v1" if service_type in ["gmail", "gchat"] else "v3"
 
     logger.info(f"Building {api_service_name} service version {version}")

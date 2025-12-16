@@ -233,7 +233,6 @@ async def search_drive_files(
     Searches for files and folders within a user's Google Drive, including shared drives.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
         query (str): The search query string. Supports Google Drive search operators.
         page_size (int): The maximum number of files to return. Defaults to 10.
         drive_id (Optional[str]): ID of the shared drive to search. If None, behavior depends on `corpora` and `include_items_from_all_drives`.
@@ -246,7 +245,7 @@ async def search_drive_files(
         str: A formatted list of found files/folders with their details (ID, name, type, size, modified time, link).
     """
 
-    service = get_google_service()
+    service = get_service()
 
     # Check if the query looks like a structured Drive query or free text
     # Look for Drive API operators and structured query patterns
@@ -308,7 +307,7 @@ async def get_drive_file_content(
         str: The file content as plain text with metadata header.
     """
     logger.info(f"[get_drive_file_content] Invoked. File ID: '{file_id}'")
-    service = get_google_service()
+    service = get_service()
 
     resolved_file_id, file_metadata = await resolve_drive_item(
         service,
@@ -390,7 +389,6 @@ async def list_drive_items(
     If `drive_id` is not specified, lists items from user's "My Drive" and accessible shared drives (if `include_items_from_all_drives` is True).
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
         folder_id (str): The ID of the Google Drive folder. Defaults to 'root'. For a shared drive, this can be the shared drive's ID to list its root, or a folder ID within that shared drive.
         page_size (int): The maximum number of items to return. Defaults to 100.
         drive_id (Optional[str]): ID of the shared drive. If provided, the listing is scoped to this drive.
@@ -400,7 +398,7 @@ async def list_drive_items(
     Returns:
         str: A formatted list of files/folders in the specified folder.
     """
-    service = get_google_service()
+    service = get_service()
 
     logger.info(f"[list_drive_items] Invoked. Folder ID: '{folder_id}'")
 
@@ -443,7 +441,6 @@ async def create_drive_file(
     Accepts either direct content or a fileUrl to fetch the content from.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
         file_name (str): The name for the new file.
         content (Optional[str]): If provided, the content to write to the file.
         folder_id (str): The ID of the parent folder. Defaults to 'root'.
@@ -453,7 +450,7 @@ async def create_drive_file(
     Returns:
         str: Confirmation message of the successful file creation with file link.
     """
-    service = get_google_service()
+    service = get_service()
     logger.info(f"[create_drive_file] Invoked. File: {file_name}, URL: {fileUrl}")
 
     if not content and not fileUrl:
@@ -611,13 +608,12 @@ async def get_drive_file_permissions(
     Gets detailed metadata about a Google Drive file including sharing permissions.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
         file_id (str): The ID of the file to check permissions for.
 
     Returns:
         str: Detailed file metadata including sharing status and URLs.
     """
-    service = get_google_service()
+    service = get_service()
 
     logger.info(f"[get_drive_file_permissions] Checking file {file_id} ")
 
@@ -728,13 +724,12 @@ async def check_drive_file_public_access(
     Searches for a file by name and checks if it has public link sharing enabled.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
         file_name (str): The name of the file to check.
 
     Returns:
         str: Information about the file's sharing status and whether it can be used in Google Docs.
     """
-    service = get_google_service()
+    service = get_service()
 
     logger.info(f"[check_drive_file_public_access] Searching for {file_name}")
 
@@ -835,7 +830,6 @@ async def update_drive_file(
     Updates metadata and properties of a Google Drive file.
 
     Args:
-        user_google_email (str): The user's Google email address. Required.
         file_id (str): The ID of the file to update. Required.
         name (Optional[str]): New name for the file.
         description (Optional[str]): New description for the file.
@@ -851,7 +845,7 @@ async def update_drive_file(
     Returns:
         str: Confirmation message with details of the updates applied.
     """
-    service = get_google_service()
+    service = get_service()
 
     logger.info(f"[update_drive_file] Updating file {file_id}")
 
