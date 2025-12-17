@@ -9,6 +9,7 @@ import MCP.tools.gdrive_tools
 import MCP.tools.gslide_tools
 import MCP.tools.gsheet_tools
 import MCP.tools.gform_tools
+import MCP.tools.gdocs_tools
 
 if __name__ == "__main__":
     content_server.run()

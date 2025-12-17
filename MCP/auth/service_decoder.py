@@ -48,6 +48,10 @@ SCOPES = {
         "https://www.googleapis.com/auth/forms.body",
         "https://www.googleapis.com/auth/forms.responses.readonly",
     ],
+    "docs": [
+        "https://www.googleapis.com/auth/documents",
+        "https://www.googleapis.com/auth/documents.readonly",
+    ],
 }
 
 _service_cache: Dict[str, any] = {}
@@ -115,7 +119,7 @@ def get_google_service(
     api_service_name = "tasks" if service_type == "task" else service_type
     version = (
         "v1"
-        if service_type in ["gmail", "gchat", "tasks", "slides", "forms"]
+        if service_type in ["gmail", "gchat", "tasks", "slides", "forms", "docs"]
         else "v4"
         if service_type in ["sheets"]
         else "v3"
