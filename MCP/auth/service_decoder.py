@@ -40,6 +40,10 @@ SCOPES = {
         "https://www.googleapis.com/auth/presentations",
         "https://www.googleapis.com/auth/presentations.readonly",
     ],
+    "sheets": [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/spreadsheets.readonly",
+    ],
 }
 
 _service_cache: Dict[str, any] = {}
@@ -105,7 +109,13 @@ def get_google_service(
     api_service_name = "chat" if service_type == "gchat" else service_type
     api_service_name = "drive" if service_type == "gdrive" else service_type
     api_service_name = "tasks" if service_type == "task" else service_type
-    version = "v1" if service_type in ["gmail", "gchat", "tasks", "slides"] else "v3"
+    version = (
+        "v1"
+        if service_type in ["gmail", "gchat", "tasks", "slides"]
+        else "v4"
+        if service_type in ["sheets"]
+        else "v3"
+    )
 
     logger.info(f"Building {api_service_name} service version {version}")
     service = build(api_service_name, version, credentials=creds)

@@ -156,3 +156,9 @@ def extract_office_xml_text(file_bytes: bytes, mime_type: str) -> Optional[str]:
             f"Failed to extract office XML text for {mime_type}: {e}", exc_info=True
         )
         return None
+
+
+class UserInputError(Exception):
+    """Raised for user-facing input/validation errors that shouldn't be retried."""
+
+    pass

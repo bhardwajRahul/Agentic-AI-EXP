@@ -7,6 +7,7 @@ sys.path.insert(0, str(root_dir))
 from MCP.core.server_init import content_server
 import MCP.tools.gdrive_tools
 import MCP.tools.gslide_tools
+import MCP.tools.gsheet_tools
 
 if __name__ == "__main__":
     content_server.run()
