@@ -89,7 +89,7 @@ def build_graph(tool_sets, checkpointer):
                 content=f"[SUPERVISOR ERROR] Routing failed: {e}. Defaulting to FINISH.",
                 name="supervisor",
             )
-
+            # can add a regex string matching to overcome this kind of problem and use pydantic here why not
             response = Route(step="FINISH")
 
             logger.info("=" * 80)
