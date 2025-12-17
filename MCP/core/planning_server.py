@@ -6,6 +6,7 @@ sys.path.insert(0, str(root_dir))
 
 from MCP.core.server_init import planning_server
 import MCP.tools.calendar_tools
+import MCP.tools.gtask_tools
 
 if __name__ == "__main__":
     planning_server.run()
