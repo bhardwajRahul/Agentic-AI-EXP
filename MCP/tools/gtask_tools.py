@@ -14,6 +14,33 @@ from googleapiclient.errors import HttpError
 
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.server_init import planning_server
+from MCP.helper.pydantic_models import (
+    TaskListInfo,
+    ListTaskListsRequest,
+    ListTaskListsResponse,
+    GetTaskListRequest,
+    GetTaskListResponse,
+    CreateTaskListRequest,
+    CreateTaskListResponse,
+    UpdateTaskListRequest,
+    UpdateTaskListResponse,
+    DeleteTaskListRequest,
+    DeleteTaskListResponse,
+    ListTasksRequest,
+    ListTasksResponse,
+    GetTaskRequest,
+    GetTaskResponse,
+    CreateTaskRequest,
+    CreateTaskResponse,
+    UpdateTaskRequest,
+    UpdateTaskResponse,
+    DeleteTaskRequest,
+    DeleteTaskResponse,
+    MoveTaskRequest,
+    MoveTaskResponse,
+    ClearCompletedTasksRequest,
+    ClearCompletedTasksResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,43 +122,57 @@ async def list_task_lists(
     Returns:
         str: List of task lists with their IDs, titles, and details.
     """
+    # Validate input parameters
+    try:
+        request = ListTaskListsRequest(max_results=max_results, page_token=page_token)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[list_task_lists] {error_msg}")
+        return ListTaskListsResponse(
+            status="error", count=0, task_lists=[], error=error_msg
+        ).model_dump_json(indent=2)
+
     logger.info("[list_task_lists] Invoked.")
     service = get_service()
 
     try:
         params: Dict[str, Any] = {}
-        if max_results is not None:
-            params["maxResults"] = max_results
-        if page_token:
-            params["pageToken"] = page_token
+        if request.max_results is not None:
+            params["maxResults"] = request.max_results
+        if request.page_token:
+            params["pageToken"] = request.page_token
 
         result = await asyncio.to_thread(service.tasklists().list(**params).execute)
 
-        task_lists = result.get("items", [])
+        task_lists_raw = result.get("items", [])
         next_page_token = result.get("nextPageToken")
 
-        if not task_lists:
-            return "No task lists found."
-
-        response = "Task Lists :\n"
-        for task_list in task_lists:
-            response += f"- {task_list['title']} (ID: {task_list['id']})\n"
-            response += f"  Updated: {task_list.get('updated', 'N/A')}\n"
-
-        if next_page_token:
-            response += f"\nNext page token: {next_page_token}"
+        # Convert to Pydantic models
+        task_lists = [
+            TaskListInfo(id=tl["id"], title=tl["title"], updated=tl.get("updated"))
+            for tl in task_lists_raw
+        ]
 
         logger.info(f"Found {len(task_lists)} task lists")
-        return response
+        return ListTaskListsResponse(
+            status="success",
+            count=len(task_lists),
+            task_lists=task_lists,
+            next_page_token=next_page_token,
+        ).model_dump_json(indent=2)
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[list_task_lists] {error_msg}")
+        return ListTaskListsResponse(
+            status="error", count=0, task_lists=[], error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[list_task_lists] {error_msg}")
+        return ListTaskListsResponse(
+            status="error", count=0, task_lists=[], error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()  # type: ignore
@@ -145,30 +186,46 @@ async def get_task_list(task_list_id: str) -> str:
     Returns:
         str: Task list details including title, ID, and last updated time.
     """
-    logger.info(f"[get_task_list] Invoked. Task List ID: {task_list_id}")
+    # Validate input parameters
+    try:
+        request = GetTaskListRequest(task_list_id=task_list_id)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[get_task_list] {error_msg}")
+        return GetTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
+    logger.info(f"[get_task_list] Invoked. Task List ID: {request.task_list_id}")
     service = get_service()
     try:
         task_list = await asyncio.to_thread(
-            service.tasklists().get(tasklist=task_list_id).execute
+            service.tasklists().get(tasklist=request.task_list_id).execute
         )
 
-        response = f"""Task List Details :
+        message = f"""Task List Details:
 - Title: {task_list["title"]}
 - ID: {task_list["id"]}
 - Updated: {task_list.get("updated", "N/A")}
 - Self Link: {task_list.get("selfLink", "N/A")}"""
 
         logger.info(f"Retrieved task list '{task_list['title']}'")
-        return response
+        return GetTaskListResponse(status="success", message=message).model_dump_json(
+            indent=2
+        )
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[get_task_list] {error_msg}")
+        return GetTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[get_task_list] {error_msg}")
+        return GetTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -182,31 +239,47 @@ async def create_task_list(title: str) -> str:
     Returns:
         str: Confirmation message with the new task list ID and details.
     """
-    logger.info(f"[create_task_list] Invoked. Title: '{title}'")
+    # Validate input parameters
+    try:
+        request = CreateTaskListRequest(title=title)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[create_task_list] {error_msg}")
+        return CreateTaskListResponse(
+            status="error", message="", task_list_id=None, error=error_msg
+        ).model_dump_json(indent=2)
+
+    logger.info(f"[create_task_list] Invoked. Title: '{request.title}'")
     service = get_service()
 
     try:
-        body = {"title": title}
+        body = {"title": request.title}
 
         result = await asyncio.to_thread(service.tasklists().insert(body=body).execute)
 
-        response = f"""Task List Created :
+        message = f"""Task List Created:
 - Title: {result["title"]}
 - ID: {result["id"]}
 - Created: {result.get("updated", "N/A")}
 - Self Link: {result.get("selfLink", "N/A")}"""
 
-        logger.info(f"Created task list '{title}' with ID {result['id']}")
-        return response
+        logger.info(f"Created task list '{request.title}' with ID {result['id']}")
+        return CreateTaskListResponse(
+            status="success", message=message, task_list_id=result["id"]
+        ).model_dump_json(indent=2)
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[create_task_list] {error_msg}")
+        return CreateTaskListResponse(
+            status="error", message="", task_list_id=None, error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[create_task_list] {error_msg}")
+        return CreateTaskListResponse(
+            status="error", message="", task_list_id=None, error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -221,34 +294,52 @@ async def update_task_list(task_list_id: str, title: str) -> str:
     Returns:
         str: Confirmation message with updated task list details.
     """
+    # Validate input parameters
+    try:
+        request = UpdateTaskListRequest(task_list_id=task_list_id, title=title)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[update_task_list] {error_msg}")
+        return UpdateTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     logger.info(
-        f"[update_task_list] Invoked. Task List ID: {task_list_id}, New Title: '{title}'"
+        f"[update_task_list] Invoked. Task List ID: {request.task_list_id}, New Title: '{request.title}'"
     )
     service = get_service()
 
     try:
-        body = {"id": task_list_id, "title": title}
+        body = {"id": request.task_list_id, "title": request.title}
 
         result = await asyncio.to_thread(
-            service.tasklists().update(tasklist=task_list_id, body=body).execute
+            service.tasklists().update(tasklist=request.task_list_id, body=body).execute
         )
 
-        response = f"""Task List Updated:
+        message = f"""Task List Updated:
 - Title: {result["title"]}
 - ID: {result["id"]}
 - Updated: {result.get("updated", "N/A")}"""
 
-        logger.info(f"Updated task list {task_list_id} with new title '{title}'")
-        return response
+        logger.info(
+            f"Updated task list {request.task_list_id} with new title '{request.title}'"
+        )
+        return UpdateTaskListResponse(
+            status="success", message=message
+        ).model_dump_json(indent=2)
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[update_task_list] {error_msg}")
+        return UpdateTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[update_task_list] {error_msg}")
+        return UpdateTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -262,26 +353,42 @@ async def delete_task_list(task_list_id: str) -> str:
     Returns:
         str: Confirmation message.
     """
-    logger.info(f"[delete_task_list] Invoked. Task List ID: {task_list_id}")
+    # Validate input parameters
+    try:
+        request = DeleteTaskListRequest(task_list_id=task_list_id)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[delete_task_list] {error_msg}")
+        return DeleteTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
+    logger.info(f"[delete_task_list] Invoked. Task List ID: {request.task_list_id}")
     service = get_service()
     try:
         await asyncio.to_thread(
-            service.tasklists().delete(tasklist=task_list_id).execute
+            service.tasklists().delete(tasklist=request.task_list_id).execute
         )
 
-        response = f"Task list {task_list_id} has been deleted. All tasks in this list have also been deleted."
+        message = f"Task list {request.task_list_id} has been deleted. All tasks in this list have also been deleted."
 
-        logger.info(f"Deleted task list {task_list_id}")
-        return response
+        logger.info(f"Deleted task list {request.task_list_id}")
+        return DeleteTaskListResponse(
+            status="success", message=message
+        ).model_dump_json(indent=2)
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[delete_task_list] {error_msg}")
+        return DeleteTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[delete_task_list] {error_msg}")
+        return DeleteTaskListResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -319,27 +426,50 @@ async def list_tasks(
     Returns:
         str: List of tasks with their details.
     """
-    logger.info(f"[list_tasks] Invoked., Task List ID: {task_list_id}")
+    # Validate input parameters
+    try:
+        request = ListTasksRequest(
+            task_list_id=task_list_id,
+            max_results=max_results,
+            page_token=page_token,
+            show_completed=show_completed,
+            show_deleted=show_deleted,
+            show_hidden=show_hidden,
+            show_assigned=show_assigned,
+            completed_max=completed_max,
+            completed_min=completed_min,
+            due_max=due_max,
+            due_min=due_min,
+            updated_min=updated_min,
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[list_tasks] {error_msg}")
+        return ListTasksResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
+    logger.info(f"[list_tasks] Invoked. Task List ID: {request.task_list_id}")
     service = get_service()
     try:
-        params: Dict[str, Any] = {"tasklist": task_list_id}
-        if max_results is not None:
-            params["maxResults"] = max_results
-        if page_token:
-            params["pageToken"] = page_token
-        if show_completed is not None:
-            params["showCompleted"] = show_completed
-        if show_deleted is not None:
-            params["showDeleted"] = show_deleted
-        if show_hidden is not None:
-            params["showHidden"] = show_hidden
-        if show_assigned is not None:
-            params["showAssigned"] = show_assigned
-        if completed_max:
-            params["completedMax"] = completed_max
-        if completed_min:
-            params["completedMin"] = completed_min
-        if due_max:
+        params: Dict[str, Any] = {"tasklist": request.task_list_id}
+        if request.max_results is not None:
+            params["maxResults"] = request.max_results
+        if request.page_token:
+            params["pageToken"] = request.page_token
+        if request.show_completed is not None:
+            params["showCompleted"] = request.show_completed
+        if request.show_deleted is not None:
+            params["showDeleted"] = request.show_deleted
+        if request.show_hidden is not None:
+            params["showHidden"] = request.show_hidden
+        if request.show_assigned is not None:
+            params["showAssigned"] = request.show_assigned
+        if request.completed_max:
+            params["completedMax"] = request.completed_max
+        if request.completed_min:
+            params["completedMin"] = request.completed_min
+        if request.due_max:
             adjusted_due_max = _adjust_due_max_for_tasks_api(due_max)
             if adjusted_due_max != due_max:
                 logger.info(
@@ -529,45 +659,65 @@ async def get_task(task_list_id: str, task_id: str) -> str:
     Returns:
         str: Task details including title, notes, status, due date, etc.
     """
-    logger.info(f"[get_task] Invoked. Task List ID: {task_list_id}, Task ID: {task_id}")
+    # Validate input parameters
+    try:
+        request = GetTaskRequest(task_list_id=task_list_id, task_id=task_id)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[get_task] {error_msg}")
+        return GetTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
+    logger.info(
+        f"[get_task] Invoked. Task List ID: {request.task_list_id}, Task ID: {request.task_id}"
+    )
     service = get_service()
     try:
         task = await asyncio.to_thread(
-            service.tasks().get(tasklist=task_list_id, task=task_id).execute
+            service.tasks()
+            .get(tasklist=request.task_list_id, task=request.task_id)
+            .execute
         )
 
-        response = f"""Task Details:
+        message = f"""Task Details:
 - Title: {task.get("title", "Untitled")}
 - ID: {task["id"]}
 - Status: {task.get("status", "N/A")}
 - Updated: {task.get("updated", "N/A")}"""
 
         if task.get("due"):
-            response += f"\n- Due Date: {task['due']}"
+            message += f"\n- Due: {task.get('due')}"
         if task.get("completed"):
-            response += f"\n- Completed: {task['completed']}"
+            message += f"\n- Completed: {task.get('completed')}"
         if task.get("notes"):
-            response += f"\n- Notes: {task['notes']}"
+            message += f"\n- Notes: {task.get('notes')}"
         if task.get("parent"):
-            response += f"\n- Parent Task ID: {task['parent']}"
+            message += f"\n- Parent Task ID: {task.get('parent')}"
         if task.get("position"):
-            response += f"\n- Position: {task['position']}"
+            message += f"\n- Position: {task.get('position')}"
         if task.get("selfLink"):
-            response += f"\n- Self Link: {task['selfLink']}"
+            message += f"\n- Self Link: {task.get('selfLink')}"
         if task.get("webViewLink"):
-            response += f"\n- Web View Link: {task['webViewLink']}"
+            message += f"\n- Web View Link: {task.get('webViewLink')}"
 
         logger.info(f"Retrieved task '{task.get('title', 'Untitled')}'")
-        return response
+        return GetTaskResponse(status="success", message=message).model_dump_json(
+            indent=2
+        )
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[get_task] {error_msg}")
+        return GetTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[get_task] {error_msg}")
+        return GetTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -593,50 +743,73 @@ async def create_task(
     Returns:
         str: Confirmation message with the new task ID and details.
     """
+    # Validate input parameters
+    try:
+        request = CreateTaskRequest(
+            task_list_id=task_list_id,
+            title=title,
+            notes=notes,
+            due=due,
+            parent=parent,
+            previous=previous,
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[create_task] {error_msg}")
+        return CreateTaskResponse(
+            status="error", message="", task_id=None, error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
     logger.info(
-        f"[create_task] Invoked. Task List ID: {task_list_id}, Title: '{title}'"
+        f"[create_task] Invoked. Task List ID: {request.task_list_id}, Title: '{request.title}'"
     )
 
     try:
-        body = {"title": title}
-        if notes:
-            body["notes"] = notes
-        if due:
-            body["due"] = due
+        body = {"title": request.title}
+        if request.notes:
+            body["notes"] = request.notes
+        if request.due:
+            body["due"] = request.due
 
-        params = {"tasklist": task_list_id, "body": body}
-        if parent:
-            params["parent"] = parent
-        if previous:
-            params["previous"] = previous
+        params = {"tasklist": request.task_list_id, "body": body}
+        if request.parent:
+            params["parent"] = request.parent
+        if request.previous:
+            params["previous"] = request.previous
 
         result = await asyncio.to_thread(service.tasks().insert(**params).execute)
 
-        response = f"""Task Created:
+        message = f"""Task Created:
 - Title: {result["title"]}
 - ID: {result["id"]}
 - Status: {result.get("status", "N/A")}
 - Updated: {result.get("updated", "N/A")}"""
 
         if result.get("due"):
-            response += f"\n- Due Date: {result['due']}"
+            message += f"\n- Due: {result.get('due')}"
         if result.get("notes"):
-            response += f"\n- Notes: {result['notes']}"
+            message += f"\n- Notes: {result.get('notes')}"
         if result.get("webViewLink"):
-            response += f"\n- Web View Link: {result['webViewLink']}"
+            message += f"\n- Web View Link: {result.get('webViewLink')}"
 
-        logger.info(f"Created task '{title}' with ID {result['id']}")
-        return response
+        logger.info(f"Created task '{request.title}' with ID {result['id']}")
+        return CreateTaskResponse(
+            status="success", message=message, task_id=result["id"]
+        ).model_dump_json(indent=2)
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[create_task] {error_msg}")
+        return CreateTaskResponse(
+            status="error", message="", task_id=None, error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[create_task] {error_msg}")
+        return CreateTaskResponse(
+            status="error", message="", task_id=None, error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -662,65 +835,92 @@ async def update_task(
     Returns:
         str: Confirmation message with updated task details.
     """
+    # Validate input parameters
+    try:
+        request = UpdateTaskRequest(
+            task_list_id=task_list_id,
+            task_id=task_id,
+            title=title,
+            notes=notes,
+            status=status,
+            due=due,
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[update_task] {error_msg}")
+        return UpdateTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
     logger.info(
-        f"[update_task] Invoked. Task List ID: {task_list_id}, Task ID: {task_id}"
+        f"[update_task] Invoked. Task List ID: {request.task_list_id}, Task ID: {request.task_id}"
     )
 
     try:
         # First get the current task to build the update body
         current_task = await asyncio.to_thread(
-            service.tasks().get(tasklist=task_list_id, task=task_id).execute
-        )
-
-        body = {
-            "id": task_id,
-            "title": title if title is not None else current_task.get("title", ""),
-            "status": status
-            if status is not None
-            else current_task.get("status", "needsAction"),
-        }
-
-        if notes is not None:
-            body["notes"] = notes
-        elif current_task.get("notes"):
-            body["notes"] = current_task["notes"]
-
-        if due is not None:
-            body["due"] = due
-        elif current_task.get("due"):
-            body["due"] = current_task["due"]
-
-        result = await asyncio.to_thread(
             service.tasks()
-            .update(tasklist=task_list_id, task=task_id, body=body)
+            .get(tasklist=request.task_list_id, task=request.task_id)
             .execute
         )
 
-        response = f"""Task Updated:
+        body = {
+            "id": request.task_id,
+            "title": request.title
+            if request.title is not None
+            else current_task.get("title", ""),
+            "status": request.status
+            if request.status is not None
+            else current_task.get("status", "needsAction"),
+        }
+
+        if request.notes is not None:
+            body["notes"] = request.notes
+        elif current_task.get("notes"):
+            body["notes"] = current_task.get("notes")
+
+        if request.due is not None:
+            body["due"] = request.due
+        elif current_task.get("due"):
+            body["due"] = current_task.get("due")
+
+        result = await asyncio.to_thread(
+            service.tasks()
+            .update(tasklist=request.task_list_id, task=request.task_id, body=body)
+            .execute
+        )
+
+        message = f"""Task Updated:
 - Title: {result["title"]}
 - ID: {result["id"]}
 - Status: {result.get("status", "N/A")}
 - Updated: {result.get("updated", "N/A")}"""
 
         if result.get("due"):
-            response += f"\n- Due Date: {result['due']}"
+            message += f"\n- Due: {result.get('due')}"
         if result.get("notes"):
-            response += f"\n- Notes: {result['notes']}"
+            message += f"\n- Notes: {result.get('notes')}"
         if result.get("completed"):
-            response += f"\n- Completed: {result['completed']}"
+            message += f"\n- Completed: {result.get('completed')}"
 
-        logger.info(f"Updated task {task_id}")
-        return response
+        logger.info(f"Updated task {request.task_id}")
+        return UpdateTaskResponse(status="success", message=message).model_dump_json(
+            indent=2
+        )
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[update_task] {error_msg}")
+        return UpdateTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[update_task] {error_msg}")
+        return UpdateTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -735,29 +935,47 @@ async def delete_task(task_list_id: str, task_id: str) -> str:
     Returns:
         str: Confirmation message.
     """
+    # Validate input parameters
+    try:
+        request = DeleteTaskRequest(task_list_id=task_list_id, task_id=task_id)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[delete_task] {error_msg}")
+        return DeleteTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
     logger.info(
-        f"[delete_task] Invoked. Task List ID: {task_list_id}, Task ID: {task_id}"
+        f"[delete_task] Invoked. Task List ID: {request.task_list_id}, Task ID: {request.task_id}"
     )
 
     try:
         await asyncio.to_thread(
-            service.tasks().delete(tasklist=task_list_id, task=task_id).execute
+            service.tasks()
+            .delete(tasklist=request.task_list_id, task=request.task_id)
+            .execute
         )
 
-        response = f"Task {task_id} has been deleted from task list {task_list_id}"
+        message = f"Task {request.task_id} has been deleted from task list {request.task_list_id}"
 
-        logger.info(f"Deleted task {task_id}")
-        return response
+        logger.info(f"Deleted task {request.task_id}")
+        return DeleteTaskResponse(status="success", message=message).model_dump_json(
+            indent=2
+        )
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[delete_task] {error_msg}")
+        return DeleteTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[delete_task] {error_msg}")
+        return DeleteTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -781,55 +999,77 @@ async def move_task(
     Returns:
         str: Confirmation message with updated task details.
     """
+    # Validate input parameters
+    try:
+        request = MoveTaskRequest(
+            task_list_id=task_list_id,
+            task_id=task_id,
+            parent=parent,
+            previous=previous,
+            destination_task_list=destination_task_list,
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[move_task] {error_msg}")
+        return MoveTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
     logger.info(
-        f"[move_task] Invoked. Task List ID: {task_list_id}, Task ID: {task_id}"
+        f"[move_task] Invoked. Task List ID: {request.task_list_id}, Task ID: {request.task_id}"
     )
 
     try:
-        params = {"tasklist": task_list_id, "task": task_id}
-        if parent:
-            params["parent"] = parent
-        if previous:
-            params["previous"] = previous
-        if destination_task_list:
-            params["destinationTasklist"] = destination_task_list
+        params = {"tasklist": request.task_list_id, "task": request.task_id}
+        if request.parent:
+            params["parent"] = request.parent
+        if request.previous:
+            params["previous"] = request.previous
+        if request.destination_task_list:
+            params["destinationTasklist"] = request.destination_task_list
 
         result = await asyncio.to_thread(service.tasks().move(**params).execute)
 
-        response = f"""Task Moved:
+        message = f"""Task Moved:
 - Title: {result["title"]}
 - ID: {result["id"]}
 - Status: {result.get("status", "N/A")}
 - Updated: {result.get("updated", "N/A")}"""
 
         if result.get("parent"):
-            response += f"\n- Parent Task ID: {result['parent']}"
+            message += f"\n- Parent Task ID: {result['parent']}"
         if result.get("position"):
-            response += f"\n- Position: {result['position']}"
+            message += f"\n- Position: {result['position']}"
 
         move_details = []
-        if destination_task_list:
-            move_details.append(f"moved to task list {destination_task_list}")
-        if parent:
-            move_details.append(f"made a subtask of {parent}")
-        if previous:
-            move_details.append(f"positioned after {previous}")
+        if request.destination_task_list:
+            move_details.append(f"moved to task list {request.destination_task_list}")
+        if request.parent:
+            move_details.append(f"made a subtask of {request.parent}")
+        if request.previous:
+            move_details.append(f"positioned after {request.previous}")
 
         if move_details:
-            response += f"\n- Move Details: {', '.join(move_details)}"
+            message += f"\n- Move Details: {', '.join(move_details)}"
 
-        logger.info(f"Moved task {task_id}")
-        return response
+        logger.info(f"Moved task {request.task_id}")
+        return MoveTaskResponse(status="success", message=message).model_dump_json(
+            indent=2
+        )
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[move_task] {error_msg}")
+        return MoveTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[move_task] {error_msg}")
+        return MoveTaskResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @planning_server.tool()
@@ -843,22 +1083,42 @@ async def clear_completed_tasks(task_list_id: str) -> str:
     Returns:
         str: Confirmation message.
     """
-    logger.info(f"[clear_completed_tasks] Invoked. Task List ID: {task_list_id}")
+    # Validate input parameters
+    try:
+        request = ClearCompletedTasksRequest(task_list_id=task_list_id)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[clear_completed_tasks] {error_msg}")
+        return ClearCompletedTasksResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
+    logger.info(
+        f"[clear_completed_tasks] Invoked. Task List ID: {request.task_list_id}"
+    )
+    service = get_service()
 
     try:
-        service = get_service()
-        await asyncio.to_thread(service.tasks().clear(tasklist=task_list_id).execute)
+        await asyncio.to_thread(
+            service.tasks().clear(tasklist=request.task_list_id).execute
+        )
 
-        response = f"All completed tasks have been cleared from task list {task_list_id}. The tasks are now hidden and won't appear in default task list views."
+        message = f"All completed tasks have been cleared from task list {request.task_list_id}. The tasks are now hidden and won't appear in default task list views."
 
-        logger.info(f"Cleared completed tasks from list {task_list_id}")
-        return response
+        logger.info(f"Cleared completed tasks from list {request.task_list_id}")
+        return ClearCompletedTasksResponse(
+            status="success", message=message
+        ).model_dump_json(indent=2)
 
     except HttpError as error:
-        message = f"API error: {error}. You might need to re-authenticate. LLM: Try 'start_google_auth' with the user's email and service_name='Google Tasks'."
-        logger.error(message, exc_info=True)
-        raise Exception(message)
+        error_msg = f"API error: {error}"
+        logger.error(f"[clear_completed_tasks] {error_msg}")
+        return ClearCompletedTasksResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
     except Exception as e:
-        message = f"Unexpected error: {e}."
-        logger.exception(message)
-        raise Exception(message)
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(f"[clear_completed_tasks] {error_msg}")
+        return ClearCompletedTasksResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)

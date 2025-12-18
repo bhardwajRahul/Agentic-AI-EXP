@@ -12,6 +12,18 @@ from pathlib import Path
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.server_init import content_server
 from MCP.tools.workspace_comment_base import create_comment_tools
+from MCP.helper.pydantic_models import (
+    CreatePresentationRequest,
+    CreatePresentationResponse,
+    GetPresentationRequest,
+    GetPresentationResponse,
+    BatchUpdatePresentationRequest,
+    BatchUpdatePresentationResponse,
+    GetPageRequest,
+    GetPageResponse,
+    GetPageThumbnailRequest,
+    GetPageThumbnailResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,24 +53,50 @@ async def create_presentation(title: str = "Untitled Presentation") -> str:
     Returns:
         str: Details about the created presentation including ID and URL.
     """
+    # Validate input parameters
+    try:
+        request = CreatePresentationRequest(title=title)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[create_presentation] {error_msg}")
+        return CreatePresentationResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
-    logger.info(f"[create_presentation] Invoked. Title: '{title}'")
+    logger.info(f"[create_presentation] Invoked. Title: '{request.title}'")
 
-    body = {"title": title}
+    body = {"title": request.title}
 
-    result = await asyncio.to_thread(service.presentations().create(body=body).execute)
+    try:
+        result = await asyncio.to_thread(
+            service.presentations().create(body=body).execute
+        )
 
-    presentation_id = result.get("presentationId")
-    presentation_url = f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+        presentation_id = result.get("presentationId")
+        presentation_url = (
+            f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+        )
 
-    confirmation_message = f"""Presentation Created Successfully:
-- Title: {title}
+        confirmation_message = f"""Presentation Created Successfully:
+- Title: {request.title}
 - Presentation ID: {presentation_id}
 - URL: {presentation_url}
 - Slides: {len(result.get("slides", []))} slide(s) created"""
 
-    logger.info("Presentation created successfully")
-    return confirmation_message
+        logger.info("Presentation created successfully")
+        return CreatePresentationResponse(
+            status="success",
+            message=confirmation_message,
+            presentation_id=presentation_id,
+        ).model_dump_json(indent=2)
+
+    except Exception as error:
+        error_msg = f"Error creating presentation: {str(error)}"
+        logger.error(f"[create_presentation] {error_msg}")
+        return CreatePresentationResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @content_server.tool()
@@ -72,11 +110,21 @@ async def get_presentation(presentation_id: str) -> str:
     Returns:
         str: Details about the presentation including title, slides count, and metadata.
     """
+    # Validate input parameters
+    try:
+        request = GetPresentationRequest(presentation_id=presentation_id)
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[get_presentation] {error_msg}")
+        return GetPresentationResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
-    logger.info(f"[get_presentation] Invoked. ID: '{presentation_id}'")
+    logger.info(f"[get_presentation] Invoked. ID: '{request.presentation_id}'")
 
     result = await asyncio.to_thread(
-        service.presentations().get(presentationId=presentation_id).execute
+        service.presentations().get(presentationId=request.presentation_id).execute
     )
 
     title = result.get("title", "Untitled")
@@ -136,8 +184,8 @@ async def get_presentation(presentation_id: str) -> str:
 
     confirmation_message = f"""Presentation Details:
 - Title: {title}
-- Presentation ID: {presentation_id}
-- URL: https://docs.google.com/presentation/d/{presentation_id}/edit
+- Presentation ID: {request.presentation_id}
+- URL: https://docs.google.com/presentation/d/{request.presentation_id}/edit
 - Total Slides: {len(slides)}
 - Page Size: {page_size.get("width", {}).get("magnitude", "Unknown")} x {page_size.get("height", {}).get("magnitude", "Unknown")} {page_size.get("width", {}).get("unit", "")}
 
@@ -145,7 +193,9 @@ Slides Breakdown:
 {chr(10).join(slides_info) if slides_info else "  No slides found"}"""
 
     logger.info("Presentation retrieved successfully")
-    return confirmation_message
+    return GetPresentationResponse(
+        status="success", message=confirmation_message
+    ).model_dump_json(indent=2)
 
 
 @content_server.tool()
@@ -163,45 +213,67 @@ async def batch_update_presentation(
     Returns:
         str: Details about the batch update operation results.
     """
+    # Validate input parameters
+    try:
+        request = BatchUpdatePresentationRequest(
+            presentation_id=presentation_id, requests=requests
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[batch_update_presentation] {error_msg}")
+        return BatchUpdatePresentationResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
     logger.info(
-        f"[batch_update_presentation] Invoked. ID: '{presentation_id}', Requests: {len(requests)}"
+        f"[batch_update_presentation] Invoked. ID: '{request.presentation_id}', Requests: {len(request.requests)}"
     )
 
-    body = {"requests": requests}
+    body = {"requests": request.requests}
 
-    result = await asyncio.to_thread(
-        service.presentations()
-        .batchUpdate(presentationId=presentation_id, body=body)
-        .execute
-    )
+    try:
+        result = await asyncio.to_thread(
+            service.presentations()
+            .batchUpdate(presentationId=request.presentation_id, body=body)
+            .execute
+        )
 
-    replies = result.get("replies", [])
+        replies = result.get("replies", [])
 
-    confirmation_message = f"""Batch Update Completed:
-- Presentation ID: {presentation_id}
-- URL: https://docs.google.com/presentation/d/{presentation_id}/edit
-- Requests Applied: {len(requests)}
+        confirmation_message = f"""Batch Update Completed:
+- Presentation ID: {request.presentation_id}
+- URL: https://docs.google.com/presentation/d/{request.presentation_id}/edit
+- Requests Applied: {len(request.requests)}
 - Replies Received: {len(replies)}"""
 
-    if replies:
-        confirmation_message += "\n\nUpdate Results:"
-        for i, reply in enumerate(replies, 1):
-            if "createSlide" in reply:
-                slide_id = reply["createSlide"].get("objectId", "Unknown")
-                confirmation_message += (
-                    f"\n  Request {i}: Created slide with ID {slide_id}"
-                )
-            elif "createShape" in reply:
-                shape_id = reply["createShape"].get("objectId", "Unknown")
-                confirmation_message += (
-                    f"\n  Request {i}: Created shape with ID {shape_id}"
-                )
-            else:
-                confirmation_message += f"\n  Request {i}: Operation completed"
+        if replies:
+            confirmation_message += "\n\nUpdate Results:"
+            for i, reply in enumerate(replies, 1):
+                if "createSlide" in reply:
+                    slide_id = reply["createSlide"].get("objectId", "Unknown")
+                    confirmation_message += (
+                        f"\n  Request {i}: Created slide with ID {slide_id}"
+                    )
+                elif "createShape" in reply:
+                    shape_id = reply["createShape"].get("objectId", "Unknown")
+                    confirmation_message += (
+                        f"\n  Request {i}: Created shape with ID {shape_id}"
+                    )
+                else:
+                    confirmation_message += f"\n  Request {i}: Operation completed"
 
-    logger.info("Batch update completed successfully")
-    return confirmation_message
+        logger.info("Batch update completed successfully")
+        return BatchUpdatePresentationResponse(
+            status="success", message=confirmation_message
+        ).model_dump_json(indent=2)
+
+    except Exception as error:
+        error_msg = f"Error updating presentation: {str(error)}"
+        logger.error(f"[batch_update_presentation] {error_msg}")
+        return BatchUpdatePresentationResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @content_server.tool()
@@ -216,49 +288,74 @@ async def get_page(presentation_id: str, page_object_id: str) -> str:
     Returns:
         str: Details about the specific page including elements and layout.
     """
+    # Validate input parameters
+    try:
+        request = GetPageRequest(
+            presentation_id=presentation_id, page_object_id=page_object_id
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[get_page] {error_msg}")
+        return GetPageResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     service = get_service()
     logger.info(
-        f"[get_page] Invoked. Presentation: '{presentation_id}', Page: '{page_object_id}'"
+        f"[get_page] Invoked. Presentation: '{request.presentation_id}', Page: '{request.page_object_id}'"
     )
 
-    result = await asyncio.to_thread(
-        service.presentations()
-        .pages()
-        .get(presentationId=presentation_id, pageObjectId=page_object_id)
-        .execute
-    )
+    try:
+        result = await asyncio.to_thread(
+            service.presentations()
+            .pages()
+            .get(
+                presentationId=request.presentation_id,
+                pageObjectId=request.page_object_id,
+            )
+            .execute
+        )
 
-    page_type = result.get("pageType", "Unknown")
-    page_elements = result.get("pageElements", [])
+        page_type = result.get("pageType", "Unknown")
+        page_elements = result.get("pageElements", [])
 
-    elements_info = []
-    for element in page_elements:
-        element_id = element.get("objectId", "Unknown")
-        if "shape" in element:
-            shape_type = element["shape"].get("shapeType", "Unknown")
-            elements_info.append(f"  Shape: ID {element_id}, Type: {shape_type}")
-        elif "table" in element:
-            table = element["table"]
-            rows = table.get("rows", 0)
-            cols = table.get("columns", 0)
-            elements_info.append(f"  Table: ID {element_id}, Size: {rows}x{cols}")
-        elif "line" in element:
-            line_type = element["line"].get("lineType", "Unknown")
-            elements_info.append(f"  Line: ID {element_id}, Type: {line_type}")
-        else:
-            elements_info.append(f"  Element: ID {element_id}, Type: Unknown")
+        elements_info = []
+        for element in page_elements:
+            element_id = element.get("objectId", "Unknown")
+            if "shape" in element:
+                shape_type = element["shape"].get("shapeType", "Unknown")
+                elements_info.append(f"  Shape: ID {element_id}, Type: {shape_type}")
+            elif "table" in element:
+                table = element["table"]
+                rows = table.get("rows", 0)
+                cols = table.get("columns", 0)
+                elements_info.append(f"  Table: ID {element_id}, Size: {rows}x{cols}")
+            elif "line" in element:
+                line_type = element["line"].get("lineType", "Unknown")
+                elements_info.append(f"  Line: ID {element_id}, Type: {line_type}")
+            else:
+                elements_info.append(f"  Element: ID {element_id}, Type: Unknown")
 
-    confirmation_message = f"""Page Details:
-- Presentation ID: {presentation_id}
-- Page ID: {page_object_id}
+        confirmation_message = f"""Page Details:
+- Presentation ID: {request.presentation_id}
+- Page ID: {request.page_object_id}
 - Page Type: {page_type}
 - Total Elements: {len(page_elements)}
 
 Page Elements:
 {chr(10).join(elements_info) if elements_info else "  No elements found"}"""
 
-    logger.info("Page retrieved successfully")
-    return confirmation_message
+        logger.info("Page retrieved successfully")
+        return GetPageResponse(
+            status="success", message=confirmation_message
+        ).model_dump_json(indent=2)
+
+    except Exception as error:
+        error_msg = f"Error retrieving page: {str(error)}"
+        logger.error(f"[get_page] {error_msg}")
+        return GetPageResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 @content_server.tool()
@@ -278,35 +375,61 @@ async def get_page_thumbnail(
     Returns:
         str: URL to the generated thumbnail image.
     """
+    # Validate input parameters
+    try:
+        request = GetPageThumbnailRequest(
+            presentation_id=presentation_id,
+            page_object_id=page_object_id,
+            thumbnail_size=thumbnail_size,
+        )
+    except Exception as e:
+        error_msg = f"Invalid parameters: {str(e)}"
+        logger.error(f"[get_page_thumbnail] {error_msg}")
+        return GetPageThumbnailResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
+
     logger.info(
-        f"[get_page_thumbnail] Invoked. Presentation: '{presentation_id}', Page: '{page_object_id}', Size: '{thumbnail_size}'"
+        f"[get_page_thumbnail] Invoked. Presentation: '{request.presentation_id}', Page: '{request.page_object_id}', Size: '{request.thumbnail_size}'"
     )
     service = get_service()
 
-    result = await asyncio.to_thread(
-        service.presentations()
-        .pages()
-        .getThumbnail(
-            presentationId=presentation_id,
-            pageObjectId=page_object_id,
-            thumbnailProperties_thumbnailSize=thumbnail_size,
-            thumbnailProperties_mimeType="PNG",
+    try:
+        result = await asyncio.to_thread(
+            service.presentations()
+            .pages()
+            .getThumbnail(
+                presentationId=request.presentation_id,
+                pageObjectId=request.page_object_id,
+                thumbnailProperties_thumbnailSize=request.thumbnail_size,
+                thumbnailProperties_mimeType="PNG",
+            )
+            .execute
         )
-        .execute
-    )
 
-    thumbnail_url = result.get("contentUrl", "")
+        thumbnail_url = result.get("contentUrl", "")
 
-    confirmation_message = f"""Thumbnail Generated:
-- Presentation ID: {presentation_id}
-- Page ID: {page_object_id}
-- Thumbnail Size: {thumbnail_size}
+        confirmation_message = f"""Thumbnail Generated:
+- Presentation ID: {request.presentation_id}
+- Page ID: {request.page_object_id}
+- Thumbnail Size: {request.thumbnail_size}
 - Thumbnail URL: {thumbnail_url}
 
 You can view or download the thumbnail using the provided URL."""
 
-    logger.info("Thumbnail generated successfully")
-    return confirmation_message
+        logger.info("Thumbnail generated successfully")
+        return GetPageThumbnailResponse(
+            status="success",
+            message=confirmation_message,
+            thumbnail_url=thumbnail_url,
+        ).model_dump_json(indent=2)
+
+    except Exception as error:
+        error_msg = f"Error generating thumbnail: {str(error)}"
+        logger.error(f"[get_page_thumbnail] {error_msg}")
+        return GetPageThumbnailResponse(
+            status="error", message="", error=error_msg
+        ).model_dump_json(indent=2)
 
 
 # Create comment management tools for slides

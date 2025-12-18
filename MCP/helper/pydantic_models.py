@@ -557,3 +557,327 @@ class DeleteEventResponse(BaseModel):
 
 
 # ========================= GDrive ==============================================
+
+
+# ========================= Google Tasks Models =================================
+
+
+class TaskListInfo(BaseModel):
+    """Task list information"""
+
+    id: str
+    title: str
+    updated: Optional[str] = None
+
+
+class ListTaskListsRequest(BaseModel):
+    """List task lists request"""
+
+    max_results: int = Field(
+        1000, ge=1, le=1000, description="Max number of task lists"
+    )
+    page_token: Optional[str] = Field(None, description="Token for pagination")
+
+
+class ListTaskListsResponse(BaseModel):
+    """List task lists response"""
+
+    status: str
+    count: int
+    task_lists: List[TaskListInfo]
+    next_page_token: Optional[str] = None
+    error: Optional[str] = None
+
+
+class GetTaskListRequest(BaseModel):
+    """Get task list request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+
+
+class GetTaskListResponse(BaseModel):
+    """Get task list response"""
+
+    status: str
+    task_list: Optional[TaskListInfo] = None
+    error: Optional[str] = None
+
+
+class CreateTaskListRequest(BaseModel):
+    """Create task list request"""
+
+    title: str = Field(
+        ..., min_length=1, max_length=1024, description="Task list title"
+    )
+
+
+class CreateTaskListResponse(BaseModel):
+    """Create task list response"""
+
+    status: str
+    message: str
+    task_list_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class UpdateTaskListRequest(BaseModel):
+    """Update task list request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+    title: str = Field(..., min_length=1, max_length=1024, description="New title")
+
+
+class UpdateTaskListResponse(BaseModel):
+    """Update task list response"""
+
+    status: str
+    message: str
+    task_list_id: str
+    error: Optional[str] = None
+
+
+class DeleteTaskListRequest(BaseModel):
+    """Delete task list request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID to delete")
+
+
+class DeleteTaskListResponse(BaseModel):
+    """Delete task list response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class ListTasksRequest(BaseModel):
+    """List tasks request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+    max_results: int = Field(20, ge=1, le=10000, description="Max number of tasks")
+    page_token: Optional[str] = Field(None, description="Pagination token")
+    show_completed: bool = Field(True, description="Include completed tasks")
+    show_deleted: bool = Field(False, description="Include deleted tasks")
+    show_hidden: bool = Field(False, description="Include hidden tasks")
+    show_assigned: bool = Field(False, description="Include assigned tasks")
+    completed_max: Optional[str] = Field(
+        None, description="Upper bound for completion date"
+    )
+    completed_min: Optional[str] = Field(
+        None, description="Lower bound for completion date"
+    )
+    due_max: Optional[str] = Field(None, description="Upper bound for due date")
+    due_min: Optional[str] = Field(None, description="Lower bound for due date")
+    updated_min: Optional[str] = Field(
+        None, description="Lower bound for last modification"
+    )
+
+
+class ListTasksResponse(BaseModel):
+    """List tasks response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class GetTaskRequest(BaseModel):
+    """Get task request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+    task_id: str = Field(..., min_length=1, description="Task ID")
+
+
+class GetTaskResponse(BaseModel):
+    """Get task response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class CreateTaskRequest(BaseModel):
+    """Create task request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+    title: str = Field(..., min_length=1, max_length=1024, description="Task title")
+    notes: Optional[str] = Field(None, max_length=8192, description="Task notes")
+    due: Optional[str] = Field(None, description="Due date (RFC 3339)")
+    parent: Optional[str] = Field(None, description="Parent task ID for subtasks")
+    previous: Optional[str] = Field(None, description="Previous sibling task ID")
+
+
+class CreateTaskResponse(BaseModel):
+    """Create task response"""
+
+    status: str
+    message: str
+    task_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class UpdateTaskRequest(BaseModel):
+    """Update task request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+    task_id: str = Field(..., min_length=1, description="Task ID to update")
+    title: Optional[str] = Field(None, max_length=1024, description="New title")
+    notes: Optional[str] = Field(None, max_length=8192, description="New notes")
+    status: Optional[str] = Field(
+        None, pattern="^(needsAction|completed)$", description="Task status"
+    )
+    due: Optional[str] = Field(None, description="New due date (RFC 3339)")
+
+
+class UpdateTaskResponse(BaseModel):
+    """Update task response"""
+
+    status: str
+    message: str
+    task_id: str
+    error: Optional[str] = None
+
+
+class DeleteTaskRequest(BaseModel):
+    """Delete task request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+    task_id: str = Field(..., min_length=1, description="Task ID to delete")
+
+
+class DeleteTaskResponse(BaseModel):
+    """Delete task response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class MoveTaskRequest(BaseModel):
+    """Move task request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Source task list ID")
+    task_id: str = Field(..., min_length=1, description="Task ID to move")
+    parent: Optional[str] = Field(None, description="New parent task ID")
+    previous: Optional[str] = Field(None, description="New previous sibling ID")
+    destination_task_list: Optional[str] = Field(
+        None, description="Destination task list ID"
+    )
+
+
+class MoveTaskResponse(BaseModel):
+    """Move task response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class ClearCompletedTasksRequest(BaseModel):
+    """Clear completed tasks request"""
+
+    task_list_id: str = Field(..., min_length=1, description="Task list ID")
+
+
+class ClearCompletedTasksResponse(BaseModel):
+    """Clear completed tasks response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+# ========================= Google Slides Models =================================
+
+
+class CreatePresentationRequest(BaseModel):
+    """Create presentation request"""
+
+    title: str = Field(
+        "Untitled Presentation",
+        min_length=1,
+        max_length=255,
+        description="Presentation title",
+    )
+
+
+class CreatePresentationResponse(BaseModel):
+    """Create presentation response"""
+
+    status: str
+    message: str
+    presentation_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class GetPresentationRequest(BaseModel):
+    """Get presentation request"""
+
+    presentation_id: str = Field(..., min_length=1, description="Presentation ID")
+
+
+class GetPresentationResponse(BaseModel):
+    """Get presentation response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class BatchUpdateRequest(BaseModel):
+    """Batch update request item"""
+
+    # This is a flexible model that accepts any dict structure
+    # since Google Slides API accepts various request types
+    pass
+
+
+class BatchUpdatePresentationRequest(BaseModel):
+    """Batch update presentation request"""
+
+    presentation_id: str = Field(..., min_length=1, description="Presentation ID")
+    requests: List[dict] = Field(
+        ..., min_items=1, description="List of update requests"
+    )
+
+
+class BatchUpdatePresentationResponse(BaseModel):
+    """Batch update presentation response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class GetPageRequest(BaseModel):
+    """Get page request"""
+
+    presentation_id: str = Field(..., min_length=1, description="Presentation ID")
+    page_object_id: str = Field(..., min_length=1, description="Page object ID")
+
+
+class GetPageResponse(BaseModel):
+    """Get page response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class GetPageThumbnailRequest(BaseModel):
+    """Get page thumbnail request"""
+
+    presentation_id: str = Field(..., min_length=1, description="Presentation ID")
+    page_object_id: str = Field(..., min_length=1, description="Page object ID")
+    thumbnail_size: str = Field(
+        "MEDIUM", pattern="^(LARGE|MEDIUM|SMALL)$", description="Thumbnail size"
+    )
+
+
+class GetPageThumbnailResponse(BaseModel):
+    """Get page thumbnail response"""
+
+    status: str
+    message: str
+    thumbnail_url: Optional[str] = None
+    error: Optional[str] = None

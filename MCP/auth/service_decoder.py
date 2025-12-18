@@ -1,8 +1,6 @@
-import functools
 import logging
 import os
-from pathlib import Path
-from typing import Callable, Dict
+from typing import Dict
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -133,30 +131,6 @@ def get_google_service(
     logger.info(f"Service {cache_key} created and cached successfully")
 
     return service
-
-
-def require_google_service(service_type: str, scope_key: str):
-    """Decorator to inject Google service into function"""
-
-    def decorator(func: Callable):
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            base_dir = Path(__file__).parent.parent
-            # Use service-specific token files
-            token_path = str(base_dir / "cred" / f"token_{service_type}.json")
-            creds_path = str(base_dir / "cred" / "setup_cred.json")
-
-            service = get_google_service(
-                service_type=service_type,
-                scope_key=scope_key,
-                token_path=token_path,
-                creds_path=creds_path,
-            )
-            return func(service, *args, **kwargs)
-
-        return wrapper
-
-    return decorator
 
 
 def clear_service_cache():
