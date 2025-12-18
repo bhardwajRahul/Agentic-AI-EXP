@@ -556,9 +556,6 @@ class DeleteEventResponse(BaseModel):
     error: Optional[str] = None
 
 
-# ========================= GDrive ==============================================
-
-
 # ========================= Google Tasks Models =================================
 
 
@@ -880,4 +877,223 @@ class GetPageThumbnailResponse(BaseModel):
     status: str
     message: str
     thumbnail_url: Optional[str] = None
+    error: Optional[str] = None
+
+
+# ========================= Google Sheets Models =================================
+
+
+class ListSpreadsheetsRequest(BaseModel):
+    """List spreadsheets request"""
+
+    max_results: int = Field(
+        25, ge=1, le=1000, description="Max number of spreadsheets"
+    )
+
+
+class SpreadsheetInfo(BaseModel):
+    """Spreadsheet information"""
+
+    id: str
+    name: str
+    modified_time: str
+    web_view_link: Optional[str] = None
+
+
+class ListSpreadsheetsResponse(BaseModel):
+    """List spreadsheets response"""
+
+    status: str
+    message: str
+    count: int
+    spreadsheets: List[SpreadsheetInfo]
+    error: Optional[str] = None
+
+
+class GetSpreadsheetInfoRequest(BaseModel):
+    """Get spreadsheet info request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+
+
+class GetSpreadsheetInfoResponse(BaseModel):
+    """Get spreadsheet info response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class ReadSheetValuesRequest(BaseModel):
+    """Read sheet values request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    range_name: str = Field("A1:Z1000", min_length=1, description="A1 notation range")
+
+
+class ReadSheetValuesResponse(BaseModel):
+    """Read sheet values response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class ModifySheetValuesRequest(BaseModel):
+    """Modify sheet values request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    range_name: str = Field(..., min_length=1, description="A1 notation range")
+    values: Optional[str] = Field(None, description="Values as JSON string or list")
+    value_input_option: str = Field(
+        "USER_ENTERED",
+        pattern="^(USER_ENTERED|RAW)$",
+        description="How to interpret input",
+    )
+    clear_values: bool = Field(False, description="Clear values instead of updating")
+
+
+class ModifySheetValuesResponse(BaseModel):
+    """Modify sheet values response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class FormatSheetRangeRequest(BaseModel):
+    """Format sheet range request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    range_name: str = Field(..., min_length=1, description="A1 notation range")
+    background_color: Optional[str] = Field(
+        None, description="Background color in hex format (#RRGGBB)"
+    )
+    text_color: Optional[str] = Field(
+        None, description="Text color in hex format (#RRGGBB)"
+    )
+    number_format_type: Optional[str] = Field(
+        None, description="Number format type (NUMBER, CURRENCY, etc.)"
+    )
+    number_format_pattern: Optional[str] = Field(
+        None, description="Number format pattern"
+    )
+
+
+class FormatSheetRangeResponse(BaseModel):
+    """Format sheet range response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class AddConditionalFormattingRequest(BaseModel):
+    """Add conditional formatting request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    range_name: str = Field(..., min_length=1, description="A1 notation range")
+    condition_type: str = Field(..., min_length=1, description="Condition type")
+    condition_values: Optional[str] = Field(
+        None, description="Condition values as JSON string or list"
+    )
+    background_color: Optional[str] = Field(
+        None, description="Background color in hex format (#RRGGBB)"
+    )
+    text_color: Optional[str] = Field(
+        None, description="Text color in hex format (#RRGGBB)"
+    )
+    rule_index: Optional[int] = Field(None, description="Rule index for insertion")
+    gradient_points: Optional[str] = Field(
+        None, description="Gradient points as JSON string or list"
+    )
+
+
+class AddConditionalFormattingResponse(BaseModel):
+    """Add conditional formatting response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class UpdateConditionalFormattingRequest(BaseModel):
+    """Update conditional formatting request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    rule_index: int = Field(..., ge=0, description="Rule index to update")
+    range_name: Optional[str] = Field(None, description="A1 notation range")
+    condition_type: Optional[str] = Field(None, description="Condition type")
+    condition_values: Optional[str] = Field(
+        None, description="Condition values as JSON string or list"
+    )
+    background_color: Optional[str] = Field(
+        None, description="Background color in hex format (#RRGGBB)"
+    )
+    text_color: Optional[str] = Field(
+        None, description="Text color in hex format (#RRGGBB)"
+    )
+    sheet_name: Optional[str] = Field(None, description="Sheet name")
+    gradient_points: Optional[str] = Field(
+        None, description="Gradient points as JSON string or list"
+    )
+
+
+class UpdateConditionalFormattingResponse(BaseModel):
+    """Update conditional formatting response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class DeleteConditionalFormattingRequest(BaseModel):
+    """Delete conditional formatting request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    rule_index: int = Field(..., ge=0, description="Rule index to delete")
+    sheet_name: Optional[str] = Field(None, description="Sheet name")
+
+
+class DeleteConditionalFormattingResponse(BaseModel):
+    """Delete conditional formatting response"""
+
+    status: str
+    message: str
+    error: Optional[str] = None
+
+
+class CreateSpreadsheetRequest(BaseModel):
+    """Create spreadsheet request"""
+
+    title: str = Field(
+        ..., min_length=1, max_length=400, description="Spreadsheet title"
+    )
+    sheet_names: Optional[List[str]] = Field(
+        None, description="Optional list of sheet names"
+    )
+
+
+class CreateSpreadsheetResponse(BaseModel):
+    """Create spreadsheet response"""
+
+    status: str
+    message: str
+    spreadsheet_id: Optional[str] = None
+    error: Optional[str] = None
+
+
+class CreateSheetRequest(BaseModel):
+    """Create sheet request"""
+
+    spreadsheet_id: str = Field(..., min_length=1, description="Spreadsheet ID")
+    sheet_name: str = Field(..., min_length=1, max_length=100, description="Sheet name")
+
+
+class CreateSheetResponse(BaseModel):
+    """Create sheet response"""
+
+    status: str
+    message: str
+    sheet_id: Optional[int] = None
     error: Optional[str] = None
