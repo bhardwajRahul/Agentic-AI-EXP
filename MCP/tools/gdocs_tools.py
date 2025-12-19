@@ -7,6 +7,7 @@ This module provides MCP tools for interacting with Google Docs API and managing
 import logging
 import asyncio
 import io
+from typing import List, Dict, Any
 from pathlib import Path
 
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
@@ -106,7 +107,10 @@ def drive_get_service():
 
 
 @content_server.tool()
-async def search_docs(request: SearchDocsRequest) -> dict:
+async def search_docs(
+    query: str,
+    page_size: int = 10,
+) -> dict:
     """
     Searches for Google Docs by name using Drive API (mimeType filter).
 
@@ -117,10 +121,19 @@ async def search_docs(request: SearchDocsRequest) -> dict:
     Returns:
         dict: A dictionary containing count, docs list, and query.
     """
+    try:
+        request = SearchDocsRequest(query=query, page_size=page_size)
+    except Exception as e:
+        return SearchDocsResponse(
+            count=0,
+            docs=[],
+            query=query,
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
-        logger.info(f"[search_docs] Query='{request.query}'")
+        logger.info(f"[search_docs] Query='{query}'")
 
         escaped_query = request.query.replace("'", "\\'")
 
@@ -160,12 +173,14 @@ async def search_docs(request: SearchDocsRequest) -> dict:
     except Exception as error:
         logger.error(f"Failed to search docs: {error}")
         return SearchDocsResponse(
-            count=0, docs=[], query=request.query, error=str(error)
+            count=0, docs=[], query=query, error=str(error)
         ).model_dump()
 
 
 @content_server.tool()
-async def get_doc_content(request: GetDocContentRequest) -> dict:
+async def get_doc_content(
+    document_id: str,
+) -> dict:
     """
     Retrieves content of a Google Doc or a Drive file (like .docx) identified by document_id.
     - Native Google Docs: Fetches content via Docs API.
@@ -177,6 +192,18 @@ async def get_doc_content(request: GetDocContentRequest) -> dict:
     Returns:
         dict: A dictionary containing document metadata and content.
     """
+    try:
+        request = GetDocContentRequest(document_id=document_id)
+    except Exception as e:
+        return GetDocContentResponse(
+            document_id=document_id,
+            name="",
+            mime_type="",
+            content="",
+            web_view_link="",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
+
     try:
         drive_service = drive_get_service()
         docs_service = get_service()
@@ -303,13 +330,13 @@ async def get_doc_content(request: GetDocContentRequest) -> dict:
 
             request_obj = (
                 drive_service.files().export_media(
-                    fileId=request.document_id,
+                    fileId=document_id,
                     mimeType=effective_export_mime,
                     supportsAllDrives=True,
                 )
                 if effective_export_mime
                 else drive_service.files().get_media(
-                    fileId=request.document_id, supportsAllDrives=True
+                    fileId=document_id, supportsAllDrives=True
                 )
             )
 
@@ -334,9 +361,9 @@ async def get_doc_content(request: GetDocContentRequest) -> dict:
                         f"{len(file_content_bytes)} bytes]"
                     )
 
-        logger.info(f"Successfully retrieved content from {request.document_id}")
+        logger.info(f"Successfully retrieved content from {document_id}")
         return GetDocContentResponse(
-            document_id=request.document_id,
+            document_id=document_id,
             name=file_name,
             mime_type=mime_type,
             content=body_text,
@@ -344,9 +371,9 @@ async def get_doc_content(request: GetDocContentRequest) -> dict:
         ).model_dump()
 
     except Exception as error:
-        logger.error(f"Failed to get doc content for {request.document_id}: {error}")
+        logger.error(f"Failed to get doc content for {document_id}: {error}")
         return GetDocContentResponse(
-            document_id=request.document_id,
+            document_id=document_id,
             name="",
             mime_type="",
             content="",
@@ -356,7 +383,7 @@ async def get_doc_content(request: GetDocContentRequest) -> dict:
 
 
 @content_server.tool()
-async def list_docs_in_folder(request: ListDocsInFolderRequest) -> dict:
+async def list_docs_in_folder(folder_id: str = "root", page_size: int = 100) -> dict:
     """
     Lists Google Docs within a specific Drive folder.
 
@@ -368,8 +395,18 @@ async def list_docs_in_folder(request: ListDocsInFolderRequest) -> dict:
         dict: A dictionary containing count, folder_id, and docs list.
     """
     try:
+        request = ListDocsInFolderRequest(folder_id=folder_id, page_size=page_size)
+    except Exception as e:
+        return ListDocsInFolderResponse(
+            count=0,
+            folder_id=folder_id,
+            docs=[],
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
+
+    try:
         service = get_service()
-        logger.info(f"[list_docs_in_folder] Invoked. Folder ID: '{request.folder_id}'")
+        logger.info(f"[list_docs_in_folder] Invoked. Folder ID: '{folder_id}'")
 
         rsp = await asyncio.to_thread(
             service.files()
@@ -405,14 +442,17 @@ async def list_docs_in_folder(request: ListDocsInFolderRequest) -> dict:
         ).model_dump()
 
     except Exception as error:
-        logger.error(f"Failed to list docs in folder {request.folder_id}: {error}")
+        logger.error(f"Failed to list docs in folder {folder_id}: {error}")
         return ListDocsInFolderResponse(
-            count=0, folder_id=request.folder_id, docs=[], error=str(error)
+            count=0, folder_id=folder_id, docs=[], error=str(error)
         ).model_dump()
 
 
 @content_server.tool()
-async def create_doc(request: CreateDocRequest) -> dict:
+async def create_doc(
+    title: str,
+    content: str = "",
+) -> dict:
     """
     Creates a new Google Doc and optionally inserts initial content.
     Args:
@@ -422,8 +462,15 @@ async def create_doc(request: CreateDocRequest) -> dict:
         dict: A dictionary containing success status, document_id, title, and web_view_link.
     """
     try:
+        request = CreateDocRequest(title=title, content=content)
+    except Exception as e:
+        return CreateDocResponse(
+            status="failed", title=title, error=f"Invalid parameters: {str(e)}"
+        ).model_dump()
+
+    try:
         service = get_service()
-        logger.info(f"[create_doc] Invoked. Title='{request.title}'")
+        logger.info(f"[create_doc] Invoked. Title='{title}'")
 
         doc = await asyncio.to_thread(
             service.documents().create(body={"title": request.title}).execute
@@ -443,19 +490,33 @@ async def create_doc(request: CreateDocRequest) -> dict:
             f"Successfully created Google Doc '{request.title}' (ID: {doc_id}). Link: {link}"
         )
         return CreateDocResponse(
-            success=True,
+            status="success",
             document_id=doc_id,
             title=request.title,
             web_view_link=link,
         ).model_dump()
 
     except Exception as error:
-        logger.error(f"Failed to create doc '{request.title}': {error}")
-        return CreateDocResponse(success=False, error=str(error)).model_dump()
+        logger.error(f"Failed to create doc '{title}': {error}")
+        return CreateDocResponse(
+            status="failed", title=title, error=str(error)
+        ).model_dump()
 
 
 @content_server.tool()
-async def modify_doc_text(request: ModifyDocTextRequest) -> dict:
+async def modify_doc_text(
+    document_id: str,
+    start_index: int,
+    end_index: int = None,
+    text: str = None,
+    bold: bool = None,
+    italic: bool = None,
+    underline: bool = None,
+    font_size: int = None,
+    font_family: str = None,
+    text_color: Any = None,
+    background_color: Any = None,
+) -> dict:
     """
     Modifies text in a Google Doc - can insert/replace text and/or apply formatting in a single operation.
 
@@ -475,6 +536,29 @@ async def modify_doc_text(request: ModifyDocTextRequest) -> dict:
     Returns:
         dict: A dictionary containing success status, document_id, operation, and web_view_link.
     """
+    try:
+        request = ModifyDocTextRequest(
+            document_id=document_id,
+            start_index=start_index,
+            end_index=end_index,
+            text=text,
+            bold=bold,
+            italic=italic,
+            underline=underline,
+            font_size=font_size,
+            font_family=font_family,
+            text_color=text_color,
+            background_color=background_color,
+        )
+    except Exception as e:
+        return ModifyDocTextResponse(
+            status="failed",
+            document_id=document_id,
+            operations=[],
+            web_view_link="",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
+
     try:
         service = get_service()
         logger.info(
@@ -556,59 +640,50 @@ async def modify_doc_text(request: ModifyDocTextRequest) -> dict:
                         create_delete_range_request(1 + len(request.text), adjusted_end)
                     )
                     operations.append(
-                        f"Replaced text from index {request.start_index} to {request.end_index}"
+                        f"Replaced text from index {start_index} to {end_index}"
                     )
                 else:
                     # Normal replacement: delete old text, then insert new text
                     requests.extend(
                         [
-                            create_delete_range_request(
-                                request.start_index, request.end_index
-                            ),
-                            create_insert_text_request(
-                                request.start_index, request.text
-                            ),
+                            create_delete_range_request(start_index, end_index),
+                            create_insert_text_request(start_index, text),
                         ]
                     )
                     operations.append(
-                        f"Replaced text from index {request.start_index} to {request.end_index}"
+                        f"Replaced text from index {start_index} to {end_index}"
                     )
             else:
                 # Text insertion
-                actual_index = 1 if request.start_index == 0 else request.start_index
-                requests.append(create_insert_text_request(actual_index, request.text))
-                operations.append(f"Inserted text at index {request.start_index}")
+                actual_index = 1 if start_index == 0 else start_index
+                requests.append(create_insert_text_request(actual_index, text))
+                operations.append(f"Inserted text at index {start_index}")
 
         # Handle formatting
         if any(
             [
-                request.bold is not None,
-                request.italic is not None,
-                request.underline is not None,
-                request.font_size,
-                request.font_family,
-                request.text_color,
-                request.background_color,
+                bold is not None,
+                italic is not None,
+                underline is not None,
+                font_size,
+                font_family,
+                text_color,
+                background_color,
             ]
         ):
             # Adjust range for formatting based on text operations
-            format_start = request.start_index
-            format_end = request.end_index
+            format_start = start_index
+            format_end = end_index
 
-            if request.text is not None:
-                if (
-                    request.end_index is not None
-                    and request.end_index > request.start_index
-                ):
+            if text is not None:
+                if end_index is not None and end_index > start_index:
                     # Text was replaced - format the new text
-                    format_end = request.start_index + len(request.text)
+                    format_end = start_index + len(text)
                 else:
                     # Text was inserted - format the inserted text
-                    actual_index = (
-                        1 if request.start_index == 0 else request.start_index
-                    )
+                    actual_index = 1 if start_index == 0 else start_index
                     format_start = actual_index
-                    format_end = actual_index + len(request.text)
+                    format_end = actual_index + len(text)
 
             # Handle special case for formatting at index 0
             if format_start == 0:
@@ -620,31 +695,31 @@ async def modify_doc_text(request: ModifyDocTextRequest) -> dict:
                 create_format_text_request(
                     format_start,
                     format_end,
-                    request.bold,
-                    request.italic,
-                    request.underline,
-                    request.font_size,
-                    request.font_family,
-                    request.text_color,
-                    request.background_color,
+                    bold,
+                    italic,
+                    underline,
+                    font_size,
+                    font_family,
+                    text_color,
+                    background_color,
                 )
             )
 
             format_details = []
-            if request.bold is not None:
-                format_details.append(f"bold={request.bold}")
-            if request.italic is not None:
-                format_details.append(f"italic={request.italic}")
-            if request.underline is not None:
-                format_details.append(f"underline={request.underline}")
-            if request.font_size:
-                format_details.append(f"font_size={request.font_size}")
-            if request.font_family:
-                format_details.append(f"font_family={request.font_family}")
-            if request.text_color:
-                format_details.append(f"text_color={request.text_color}")
-            if request.background_color:
-                format_details.append(f"background_color={request.background_color}")
+            if bold is not None:
+                format_details.append(f"bold={bold}")
+            if italic is not None:
+                format_details.append(f"italic={italic}")
+            if underline is not None:
+                format_details.append(f"underline={underline}")
+            if font_size:
+                format_details.append(f"font_size={font_size}")
+            if font_family:
+                format_details.append(f"font_family={font_family}")
+            if text_color:
+                format_details.append(f"text_color={text_color}")
+            if background_color:
+                format_details.append(f"background_color={background_color}")
 
             operations.append(
                 f"Applied formatting ({', '.join(format_details)}) to range {format_start}-{format_end}"
@@ -652,31 +727,38 @@ async def modify_doc_text(request: ModifyDocTextRequest) -> dict:
 
         await asyncio.to_thread(
             service.documents()
-            .batchUpdate(documentId=request.document_id, body={"requests": requests})
+            .batchUpdate(documentId=document_id, body={"requests": requests})
             .execute
         )
 
-        link = f"https://docs.google.com/document/d/{request.document_id}/edit"
+        link = f"https://docs.google.com/document/d/{document_id}/edit"
         operation_summary = "; ".join(operations)
-        logger.info(
-            f"Successfully modified doc {request.document_id}: {operation_summary}"
-        )
+        logger.info(f"Successfully modified doc {document_id}: {operation_summary}")
         return ModifyDocTextResponse(
-            success=True,
-            document_id=request.document_id,
-            operation=operation_summary,
+            status="success",
+            document_id=document_id,
+            operations=operations,
             web_view_link=link,
         ).model_dump()
 
     except Exception as error:
-        logger.error(f"Failed to modify doc text for {request.document_id}: {error}")
+        logger.error(f"Failed to modify doc text for {document_id}: {error}")
         return ModifyDocTextResponse(
-            success=False, document_id=request.document_id, error=str(error)
+            status="failed",
+            document_id=document_id,
+            operations=[],
+            web_view_link="",
+            error=str(error),
         ).model_dump()
 
 
 @content_server.tool()
-async def find_and_replace_doc(request=FindAndReplaceDocRequest) -> dict:
+async def find_and_replace_doc(
+    document_id: str,
+    find_text: str,
+    replace_text: str,
+    match_case: bool = False,
+) -> dict:
     """
     Finds and replaces text throughout a Google Doc.
 
@@ -689,11 +771,28 @@ async def find_and_replace_doc(request=FindAndReplaceDocRequest) -> dict:
     Returns:
         dict: A dictionary containing success status, replacement count, and details.
     """
+    try:
+        request = FindAndReplaceDocRequest(
+            document_id=document_id,
+            find_text=find_text,
+            replace_text=replace_text,
+            match_case=match_case,
+        )
+    except Exception as e:
+        return FindAndReplaceDocResponse(
+            status="failed",
+            document_id=document_id,
+            replacements=0,
+            find_text=find_text,
+            replace_text=replace_text,
+            web_view_link="",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
         logger.info(
-            f"[find_and_replace_doc] Doc={request.document_id}, find='{request.find_text}', replace='{request.replace_text}'"
+            f"[find_and_replace_doc] Doc={document_id}, find='{find_text}', replace='{replace_text}'"
         )
 
         requests = [
@@ -718,25 +817,37 @@ async def find_and_replace_doc(request=FindAndReplaceDocRequest) -> dict:
         link = f"https://docs.google.com/document/d/{request.document_id}/edit"
         logger.info(f"Replaced {replacements} occurrences in doc {request.document_id}")
         return FindAndReplaceDocResponse(
-            success=True,
+            status="success",
             document_id=request.document_id,
-            replacements_count=replacements,
+            replacements=replacements,
             find_text=request.find_text,
             replace_text=request.replace_text,
             web_view_link=link,
         ).model_dump()
 
     except Exception as error:
-        logger.error(
-            f"Failed to find and replace in doc {request.document_id}: {error}"
-        )
+        logger.error(f"Failed to find and replace in doc {document_id}: {error}")
         return FindAndReplaceDocResponse(
-            success=False, document_id=request.document_id, error=str(error)
+            status="failed",
+            document_id=document_id,
+            replacements=0,
+            find_text=find_text,
+            replace_text=replace_text,
+            web_view_link="",
+            error=str(error),
         ).model_dump()
 
 
 @content_server.tool()
-async def insert_doc_elements(request: InsertDocElementsRequest) -> str:
+async def insert_doc_elements(
+    document_id: str,
+    element_type: str,
+    index: int,
+    rows: int = None,
+    columns: int = None,
+    list_type: str = None,
+    text: str = None,
+) -> str:
     """
     Inserts structural elements like tables, lists, or page breaks into a Google Doc.
 
@@ -754,15 +865,30 @@ async def insert_doc_elements(request: InsertDocElementsRequest) -> str:
     """
 
     try:
+        request = InsertDocElementsRequest(
+            document_id=document_id,
+            element_type=element_type,
+            index=index,
+            rows=rows,
+            columns=columns,
+            list_type=list_type,
+            text=text,
+        )
+    except Exception as e:
+        return InsertDocElementsResponse(
+            status="error", error=f"Invalid parameters: {str(e)}"
+        ).model_dump()
+
+    try:
         service = get_service()
 
         logger.info(
-            f"[insert_doc_elements] Doc={request.document_id}, type={request.element_type}, index={request.index}"
+            f"[insert_doc_elements] Doc={document_id}, type={element_type}, index={index}"
         )
 
         # Handle the special case where we can't insert at the first section break
         # If index is 0, bump it to 1 to avoid the section break
-        if request.index == 0:
+        if index == 0:
             logger.debug("Adjusting index from 0 to 1 to avoid first section break")
             index = 1
 
@@ -812,7 +938,6 @@ async def insert_doc_elements(request: InsertDocElementsRequest) -> str:
         elif request.element_type == "page_break":
             requests.append(create_insert_page_break_request(index))
             description = "page break"
-
         else:
             return InsertDocElementsResponse(
                 status="error",
@@ -825,7 +950,7 @@ async def insert_doc_elements(request: InsertDocElementsRequest) -> str:
 
         await asyncio.to_thread(
             service.documents()
-            .batchUpdate(documentId=request.document_id, body={"requests": requests})
+            .batchUpdate(documentId=document_id, body={"requests": requests})
             .execute
         )
 
@@ -840,19 +965,25 @@ async def insert_doc_elements(request: InsertDocElementsRequest) -> str:
         ).model_dump()
 
     except Exception as error:
-        logger.error(f"Failed to insert element in doc {request.document_id}: {error}")
+        logger.error(f"Failed to insert element in doc {document_id}: {error}")
         return InsertDocElementsResponse(
             status="error",
-            document_id=request.document_id,
-            element_type=request.element_type,
-            index=request.index,
+            document_id=document_id,
+            element_type=element_type,
+            index=index,
             web_view_link="",
             error=str(error),
         ).model_dump()
 
 
 @content_server.tool()
-async def insert_doc_image(request: InsertDocImageRequest) -> dict:
+async def insert_doc_image(
+    document_id: str,
+    image_source: str,
+    index: int,
+    width: int = 0,
+    height: int = 0,
+) -> dict:
     """
     Inserts an image into a Google Doc from Drive or a URL.
 
@@ -866,18 +997,35 @@ async def insert_doc_image(request: InsertDocImageRequest) -> dict:
     Returns:
         dict: A dictionary containing status, document_id, and operation details.
     """
+    try:
+        request = InsertDocImageRequest(
+            document_id=document_id,
+            image_source=image_source,
+            index=index,
+            width=width,
+            height=height,
+        )
+    except Exception as e:
+        return InsertDocImageResponse(
+            status="error",
+            document_id=document_id,
+            image_source=image_source,
+            index=index,
+            web_view_link="",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
 
     try:
         docs_service = get_service()
         drive_service = drive_get_service()
 
         logger.info(
-            f"[insert_doc_image] Doc={request.document_id}, source={request.image_source}, index={request.index}"
+            f"[insert_doc_image] Doc={document_id}, source={image_source}, index={index}"
         )
 
         # Handle the special case where we can't insert at the first section break
         # If index is 0, bump it to 1 to avoid the section break
-        if request.index == 0:
+        if index == 0:
             logger.debug("Adjusting index from 0 to 1 to avoid first section break")
             index = 1
 
@@ -949,19 +1097,24 @@ async def insert_doc_image(request: InsertDocImageRequest) -> dict:
         ).model_dump()
 
     except Exception as error:
-        logger.error(f"Failed to insert image in doc {request.document_id}: {error}")
+        logger.error(f"Failed to insert image in doc {document_id}: {error}")
         return InsertDocImageResponse(
             status="error",
-            document_id=request.document_id,
-            image_source=request.image_source,
-            index=request.index,
+            document_id=document_id,
+            image_source=image_source,
+            index=index,
             web_view_link="",
             error=str(error),
         ).model_dump()
 
 
 @content_server.tool()
-async def update_doc_headers_footers(request: UpdateDocHeadersFootersRequest) -> dict:
+async def update_doc_headers_footers(
+    document_id: str,
+    section_type: str,
+    content: str,
+    header_footer_type: str = "DEFAULT",
+) -> dict:
     """
     Updates headers or footers in a Google Doc.
 
@@ -974,11 +1127,27 @@ async def update_doc_headers_footers(request: UpdateDocHeadersFootersRequest) ->
     Returns:
         dict: A dictionary containing status, document_id, and operation details.
     """
+    try:
+        request = UpdateDocHeadersFootersRequest(
+            document_id=document_id,
+            section_type=section_type,
+            content=content,
+            header_footer_type=header_footer_type,
+        )
+    except Exception as e:
+        return UpdateDocHeadersFootersResponse(
+            status="error",
+            document_id=document_id,
+            section_type=section_type,
+            header_footer_type=header_footer_type,
+            web_view_link="",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
         logger.info(
-            f"[update_doc_headers_footers] Doc={request.document_id}, type={request.section_type}"
+            f"[update_doc_headers_footers] Doc={document_id}, type={section_type}"
         )
 
         # Use HeaderFooterManager to handle the complex logic
@@ -1014,21 +1183,22 @@ async def update_doc_headers_footers(request: UpdateDocHeadersFootersRequest) ->
             ).model_dump()
 
     except Exception as error:
-        logger.error(
-            f"Failed to update header/footer in doc {request.document_id}: {error}"
-        )
+        logger.error(f"Failed to update header/footer in doc {document_id}: {error}")
         return UpdateDocHeadersFootersResponse(
             status="error",
-            document_id=request.document_id,
-            section_type=request.section_type,
-            header_footer_type=request.header_footer_type,
+            document_id=document_id,
+            section_type=section_type,
+            header_footer_type=header_footer_type,
             web_view_link="",
             error=str(error),
         ).model_dump()
 
 
 @content_server.tool()
-async def batch_update_doc(request: BatchUpdateDocRequest) -> dict:
+async def batch_update_doc(
+    document_id: str,
+    operations: List[Dict[str, Any]],
+) -> dict:
     """
     Executes multiple document operations in a single atomic batch update.
 
@@ -1048,11 +1218,24 @@ async def batch_update_doc(request: BatchUpdateDocRequest) -> dict:
     Returns:
         dict: A dictionary containing status, document_id, and operation results.
     """
+    try:
+        request = BatchUpdateDocRequest(
+            document_id=document_id,
+            operations=operations,
+        )
+    except Exception as e:
+        return BatchUpdateDocResponse(
+            status="error",
+            document_id=document_id,
+            operations_count=len(operations),
+            web_view_link="",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
         logger.debug(
-            f"[batch_update_doc] Doc={request.document_id}, operations={len(request.operations)}"
+            f"[batch_update_doc] Doc={document_id}, operations={len(operations)}"
         )
 
         # Use BatchOperationManager to handle the complex logic
@@ -1082,18 +1265,21 @@ async def batch_update_doc(request: BatchUpdateDocRequest) -> dict:
                 error=message,
             ).model_dump()
     except Exception as error:
-        logger.error(f"Failed to batch update doc {request.document_id}: {error}")
+        logger.error(f"Failed to batch update doc {document_id}: {error}")
         return BatchUpdateDocResponse(
             status="error",
-            document_id=request.document_id,
-            operations_count=len(request.operations),
+            document_id=document_id,
+            operations_count=len(operations),
             web_view_link="",
             error=str(error),
         ).model_dump()
 
 
 @content_server.tool()
-async def inspect_doc_structure(request: InspectDocStructureRequest) -> str:
+async def inspect_doc_structure(
+    document_id: str,
+    detailed: bool = False,
+) -> str:
     """
     Essential tool for finding safe insertion points and understanding document structure.
 
@@ -1127,8 +1313,8 @@ async def inspect_doc_structure(request: InspectDocStructureRequest) -> str:
     """
     try:
         request = InspectDocStructureRequest(
-            document_id=request.document_id,
-            detailed=request.detailed,
+            document_id=document_id,
+            detailed=detailed,
         )
     except Exception as error:
         return InspectDocStructureResponse(
@@ -1140,9 +1326,7 @@ async def inspect_doc_structure(request: InspectDocStructureRequest) -> str:
 
     try:
         service = get_service()
-        logger.debug(
-            f"[inspect_doc_structure] Doc={request.document_id}, detailed={request.detailed}"
-        )
+        logger.debug(f"[inspect_doc_structure] Doc={document_id}, detailed={detailed}")
 
         # Get the document
         doc = await asyncio.to_thread(
@@ -1247,7 +1431,12 @@ async def inspect_doc_structure(request: InspectDocStructureRequest) -> str:
 
 
 @content_server.tool()
-async def create_table_with_data(request: CreateTableWithDataRequest) -> str:
+async def create_table_with_data(
+    document_id: str,
+    table_data: List[List[str]],
+    index: int,
+    bold_headers: bool = True,
+) -> str:
     """
     Creates a table and populates it with data in one reliable operation.
 
@@ -1288,6 +1477,20 @@ async def create_table_with_data(request: CreateTableWithDataRequest) -> str:
     Returns:
         str: Confirmation with table details and link
     """
+    try:
+        request = CreateTableWithDataRequest(
+            document_id=document_id,
+            table_data=table_data,
+            index=index,
+            bold_headers=bold_headers,
+        )
+    except Exception as e:
+        logger.error(f"Request validation error: {e}")
+        return CreateTableWithDataResponse(
+            status="error",
+            document_id=document_id,
+            error=f"Invalid request parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
@@ -1353,7 +1556,10 @@ async def create_table_with_data(request: CreateTableWithDataRequest) -> str:
 
 
 @content_server.tool()
-async def debug_table_structure(request: DebugTableStructureRequest) -> str:
+async def debug_table_structure(
+    document_id: str,
+    table_index: int = 0,
+) -> str:
     """
     ESSENTIAL DEBUGGING TOOL - Use this whenever tables don't work as expected.
 
@@ -1390,6 +1596,20 @@ async def debug_table_structure(request: DebugTableStructureRequest) -> str:
     Returns:
         str: Detailed JSON structure showing table layout, cell positions, and current content
     """
+    try:
+        request = DebugTableStructureRequest(
+            document_id=document_id,
+            table_index=table_index,
+        )
+    except Exception as e:
+        logger.error(f"Request validation error: {e}")
+        return DebugTableStructureResponse(
+            status="error",
+            document_id=document_id,
+            table_index=table_index,
+            structure={},
+            error=f"Invalid request parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
@@ -1460,7 +1680,11 @@ async def debug_table_structure(request: DebugTableStructureRequest) -> str:
 
 
 @content_server.tool()
-async def export_doc_to_pdf(request: ExportDocToPdfRequest) -> dict:
+async def export_doc_to_pdf(
+    document_id: str,
+    pdf_filename: str = None,
+    folder_id: str = None,
+) -> dict:
     """
     Exports a Google Doc to PDF format and saves it to Google Drive.
 
@@ -1472,6 +1696,19 @@ async def export_doc_to_pdf(request: ExportDocToPdfRequest) -> dict:
     Returns:
         dict: A dictionary containing status, document_id, and PDF details.
     """
+    try:
+        request = ExportDocToPdfRequest(
+            document_id=document_id,
+            pdf_filename=pdf_filename,
+            folder_id=folder_id,
+        )
+    except Exception as e:
+        return ExportDocToPdfResponse(
+            status="error",
+            document_id=document_id,
+            pdf_filename=pdf_filename or "",
+            error=f"Invalid parameters: {str(e)}",
+        ).model_dump()
 
     try:
         service = get_service()
