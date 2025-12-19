@@ -4,7 +4,6 @@ Google Docs MCP Tools
 This module provides MCP tools for interacting with Google Docs API and managing Google Docs via Drive.
 """
 
-import logging
 import asyncio
 import io
 from typing import List, Dict, Any
@@ -74,8 +73,9 @@ from MCP.helper.docs_managers import (
     ValidationManager,
     BatchOperationManager,
 )
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def get_service():

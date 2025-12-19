@@ -4,7 +4,6 @@ Google Slides MCP Tools
 This module provides MCP tools for interacting with Google Slides API.
 """
 
-import logging
 import asyncio
 from typing import List, Dict, Any
 from pathlib import Path
@@ -24,8 +23,9 @@ from MCP.helper.pydantic_models import (
     GetPageThumbnailRequest,
     GetPageThumbnailResponse,
 )
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def get_service():

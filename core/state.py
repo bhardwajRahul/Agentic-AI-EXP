@@ -1,10 +1,10 @@
 from typing import Annotated, Literal, Optional
-import logging
 from langgraph.graph.message import add_messages
 from pydantic import BaseModel, Field
 from typing_extensions import TypedDict
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class State(TypedDict):

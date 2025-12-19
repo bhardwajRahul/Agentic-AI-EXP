@@ -1,11 +1,11 @@
 import io
-import logging
 import zipfile
 import xml.etree.ElementTree as ET
 
 from typing import List, Optional
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def extract_office_xml_text(file_bytes: bytes, mime_type: str) -> Optional[str]:

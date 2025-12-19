@@ -7,7 +7,6 @@ This module provides MCP tools for interacting with Google Calendar API.
 import asyncio
 import datetime
 import json
-import logging
 import re
 import sys
 import uuid
@@ -34,10 +33,9 @@ from MCP.helper.pydantic_models import (
 
 root_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(root_dir))
+from utils.logger import setup_logger
 
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 # auth

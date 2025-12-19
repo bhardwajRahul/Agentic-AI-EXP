@@ -5,15 +5,15 @@ This module provides reusable comment management functions for Google Workspace 
 All Google Workspace apps (Docs, Sheets, Slides) use the Drive API for comment operations.
 """
 
-import logging
 import asyncio
 from pathlib import Path
 
 
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.server_init import content_server
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def get_service():

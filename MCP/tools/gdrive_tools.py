@@ -1,6 +1,5 @@
 import asyncio
 import io
-import logging
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,8 +28,10 @@ from MCP.helper.pydantic_models import (
     UpdateDriveFileResponse,
 )
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
+
 
 DOWNLOAD_CHUNK_SIZE_BYTES = 256 * 1024  # 256 KB
 UPLOAD_CHUNK_SIZE_BYTES = 5 * 1024 * 1024  # 5 MB (Google recommended minimum)

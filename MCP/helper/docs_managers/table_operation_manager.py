@@ -5,7 +5,6 @@ This module provides high-level table operations that orchestrate
 multiple Google Docs API calls for complex table manipulations.
 """
 
-import logging
 import asyncio
 from typing import List, Dict, Any, Tuple
 from MCP.helper.docs_helper import (
@@ -13,9 +12,9 @@ from MCP.helper.docs_helper import (
     validate_table_data,
     find_tables,
 )
+from utils.logger import setup_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class TableOperationManager:

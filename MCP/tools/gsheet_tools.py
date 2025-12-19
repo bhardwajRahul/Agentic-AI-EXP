@@ -10,7 +10,6 @@ import json
 import re
 from typing import List, Optional, Union
 from pathlib import Path
-import logging
 import copy
 from MCP.core.server_init import content_server
 from MCP.tools.workspace_comment_base import create_comment_tools
@@ -39,9 +38,9 @@ from MCP.helper.pydantic_models import (
     CreateSheetRequest,
     CreateSheetResponse,
 )
+from utils.logger import setup_logger
 
-# Configure module logger
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 A1_PART_REGEX = re.compile(r"^([A-Za-z]*)(\d*)$")

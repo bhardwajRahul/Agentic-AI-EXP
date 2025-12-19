@@ -2,7 +2,6 @@
 
 import asyncio
 import base64
-import logging
 import webbrowser
 from datetime import datetime, timedelta
 from email import message_from_bytes
@@ -48,8 +47,9 @@ from MCP.helper.pydantic_models import (
     SearchByLabelRequest,
     SearchByLabelResponse,
 )
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def get_service():

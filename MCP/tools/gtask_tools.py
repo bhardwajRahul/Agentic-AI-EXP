@@ -5,7 +5,6 @@ This module provides MCP tools for interacting with Google Tasks API.
 """
 
 import asyncio
-import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 from pathlib import Path
@@ -41,8 +40,10 @@ from MCP.helper.pydantic_models import (
     ClearCompletedTasksRequest,
     ClearCompletedTasksResponse,
 )
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
+
 
 LIST_TASKS_MAX_RESULTS_DEFAULT = 20
 LIST_TASKS_MAX_RESULTS_MAX = 10_000

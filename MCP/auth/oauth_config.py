@@ -57,9 +57,9 @@ def get_temp_file_strategy() -> str:
 
 def log_environment_info():
     """Log current environment configuration for debugging."""
-    import logging
+    from utils.logger import setup_logger
 
-    logger = logging.getLogger(__name__)
+    logger = setup_logger(__name__)
 
     mode = "STATELESS" if is_stateless_mode() else "STATEFUL"
     strategy = get_temp_file_strategy()

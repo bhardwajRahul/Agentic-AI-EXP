@@ -5,12 +5,11 @@ This module provides high-level operations for managing headers and footers
 in Google Docs, extracting complex logic from the main tools module.
 """
 
-import logging
 import asyncio
 from typing import Any, Optional
+from utils.logger import setup_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class HeaderFooterManager:

@@ -5,10 +5,10 @@ This module provides utility functions for common Google Docs operations
 to simplify the implementation of document editing tools.
 """
 
-import logging
 from typing import Dict, Any, Optional, Tuple, List, Union
+from utils.logger import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 def _normalize_color(color: Any, param_name: str) -> Optional[Dict[str, float]]:

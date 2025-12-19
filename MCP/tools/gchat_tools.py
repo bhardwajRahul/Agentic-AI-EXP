@@ -4,7 +4,6 @@ Google Chat MCP Tools
 This module provides MCP tools for interacting with Google Chat API.
 """
 
-import logging
 import asyncio
 from typing import Optional
 import sys
@@ -32,8 +31,9 @@ root_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(root_dir))
 
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from utils.logger import setup_logger
+
+logger = setup_logger(__name__)
 
 
 # auth

@@ -5,7 +5,6 @@ This module provides high-level batch operation management for Google Docs,
 extracting complex validation and request building logic.
 """
 
-import logging
 import asyncio
 from typing import Any, Union, Dict, List, Tuple
 import sys
@@ -21,9 +20,10 @@ from MCP.helper.docs_helper import (
     create_insert_page_break_request,
     validate_operation,
 )
+from utils.logger import setup_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
+
 
 root_dir = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(root_dir))
