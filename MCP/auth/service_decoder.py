@@ -6,6 +6,9 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from utils.logger import setup_logger
+import dotenv
+
+dotenv.load_dotenv()
 
 logger = setup_logger(__name__)
 
@@ -76,6 +79,26 @@ def get_google_service(
     Returns:
         Authenticated Google API service
     """
+
+    # Custom Search uses API key, not OAuth
+    if service_type == "customsearch":
+        cache_key = "customsearch_api_key"
+        if not force_refresh and cache_key in _service_cache:
+            logger.info(f"Returning cached service for {cache_key}")
+            return _service_cache[cache_key]
+
+        api_key = os.environ.get("GOOGLE_PSE_API_KEY")
+        if not api_key:
+            raise ValueError(
+                "GOOGLE_PSE_API_KEY environment variable not set. "
+                "Get your API key from https://console.cloud.google.com/apis/credentials"
+            )
+
+        logger.info("Building Custom Search service with API key")
+        service = build("customsearch", "v1", developerKey=api_key)
+        _service_cache[cache_key] = service
+        logger.info("Custom Search service created and cached successfully")
+        return service
 
     cache_key = f"{service_type}_{scope_key}"
     if not force_refresh and cache_key in _service_cache:

@@ -23,4 +23,16 @@ content_server = FastMCP(
     stateless_http=True,
 )
 
-__all__ = ["communication_server", "planning_server", "content_server"]
+supervisor_server = FastMCP(
+    name="Supervisor Server",
+    host="0.0.0.0",
+    port=8053,
+    stateless_http=True,
+)
+
+__all__ = [
+    "communication_server",
+    "planning_server",
+    "content_server",
+    "supervisor_server",
+]
