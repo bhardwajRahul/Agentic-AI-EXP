@@ -1,9 +1,15 @@
 import json
+from datetime import datetime
 
-from langchain_core.messages import trim_messages
-from langgraph.types import interrupt
-from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+import pytz
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    SystemMessage,
+    trim_messages,
+)
 from langgraph.graph import END
+from langgraph.types import interrupt
 
 from core.state import State
 from utils.context_cleaner import sanitize_history
@@ -11,6 +17,11 @@ from utils.logger import request_counter, setup_logger
 from utils.token_counter import count_tokens
 
 logger = setup_logger(__name__)
+
+
+def get_current_time():
+    now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    return now.strftime("%Y-%m-%d %H:%M:%S IST")
 
 
 def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
@@ -32,6 +43,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             include_system=True,
             start_on="human",
         )
+        logger.info(f"📨 Trimmed messages: {last_messages[:4]}")
 
         logger.info("=" * 80)
         if last_messages:  # this is for logs purpose only
@@ -44,6 +56,15 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         logger.info("=" * 80)
 
         msg = llm_with_tools.invoke(messages)
+
+        current_time = get_current_time()
+
+        raw_content = msg.content if msg.content else ""
+
+        if raw_content:
+            final_content = f"[{current_time}] {raw_content}"
+        else:
+            final_content = raw_content
 
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             logger.info(f"🔧 Tool calls made: {len(msg.tool_calls)}")
@@ -79,7 +100,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             msg.content = ""
 
         agent_message = AIMessage(
-            content=f"{msg.content}",
+            content=final_content,
             tool_calls=getattr(msg, "tool_calls", []),
             name=agent_name,
         )
@@ -92,9 +113,12 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 def human_node(state: State):
     last_message = state["messages"][-1]
     user_input = interrupt(last_message.content)
-    logger.info(f"👤 User Input: {user_input}")
+    current_time = get_current_time()
+    stamped_content = f"[{current_time}] {user_input}"
 
-    return {"messages": [HumanMessage(content=user_input)]}
+    logger.info(f"👤 User Input: {stamped_content}")
+
+    return {"messages": [HumanMessage(content=stamped_content)]}
 
 
 def route_after_human(state: State):
