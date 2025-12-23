@@ -10,7 +10,9 @@ from config.settings import (
     DEFAULT_THREAD_ID,
     planning_config,
     content_config,
+    supervisor_config,
 )
+
 from core.graph import build_graph
 from utils.checkpointer import CleaningAsyncSqliteSaver
 from utils.logger import request_counter, setup_logger
@@ -36,6 +38,10 @@ async def main():
         content_client = MultiServerMCPClient(content_config)
         content_tools = await content_client.get_tools()
         logger.info(f"✅ Content Tools: {len(content_tools)}")
+
+        supervisor_client = MultiServerMCPClient(supervisor_config)
+        supervisor_tools = await supervisor_client.get_tools()
+        logger.info(f"✅ Supervisor Tools: {len(supervisor_tools)}")
 
         tool_sets = {
             "communication": communication_tools,

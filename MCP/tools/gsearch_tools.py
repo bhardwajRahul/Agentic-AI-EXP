@@ -168,9 +168,6 @@ async def get_search_engine_info() -> str:
     """
     Retrieves metadata about a Programmable Search Engine.
 
-    Args:
-        user_google_email (str): The user's Google email address. Required.
-
     Returns:
         str: Information about the search engine including its configuration and available refinements.
     """
