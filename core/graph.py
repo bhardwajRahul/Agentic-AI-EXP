@@ -72,14 +72,14 @@ def build_graph(tool_sets, checkpointer):
             logger.info("=" * 80)
             logger.info(f"➡ Routing to: {response.step}")
 
-            supervisor_message = AIMessage(
-                content=f"[SUPERVISOR ROUTING] Delegating task to: {response.step}",
-                name="supervisor",
-            )
+            # supervisor_message = AIMessage(
+            #     content=f"[SUPERVISOR ROUTING] Delegating task to: {response.step}",
+            #     name="supervisor",
+            # )
 
             return {
                 "next": response.step,
-                "messages": [supervisor_message],
+                # "messages": [supervisor_message], right know i think this info makes no use to the context window so keep it as backup if supervisor halucinates
             }
 
         except Exception as e:
@@ -181,3 +181,65 @@ def build_graph(tool_sets, checkpointer):
 
     graph = builder.compile(checkpointer=checkpointer)
     return graph
+
+
+# // ...existing code...
+
+# from core.code_execution_agent import CodeExecutionAgent
+
+# async def supervisor_node(state: State):
+#     """Enhanced supervisor with code execution capability"""
+#     messages = state["messages"]
+
+#     # Detect if task requires complex multi-step workflow
+#     needs_code_execution = await _should_use_code_execution(messages[-1])
+
+#     if needs_code_execution:
+#         logger.info("Routing to code execution agent")
+
+#         # Initialize code execution agent
+#         code_agent = CodeExecutionAgent(
+#             llm_client=your_llm_client,
+#             mcp_clients={
+#                 "communication": communication_client,
+#                 "planning": planning_client,
+#                 "content": content_client
+#             }
+#         )
+
+#         # Execute workflow
+#         result = await code_agent.execute_workflow(
+#             task=messages[-1].content,
+#             required_tools=["content", "communication"]  # Detect from task
+#         )
+
+#         # Return only summary to continue conversation
+#         return {
+#             "messages": [AIMessage(content=result["summary"])],
+#             "next": "supervisor"  # Route back to supervisor
+#         }
+
+#     # Otherwise use normal routing
+#     # ...existing supervisor logic...
+
+# async def _should_use_code_execution(message) -> bool:
+#     """
+#     Determine if task requires code execution mode
+
+#     Use for:
+#     - Tasks with "for each" or "all" patterns
+#     - Multiple sequential operations
+#     - Data aggregation/analysis
+#     - Batch operations
+#     """
+#     indicators = [
+#         "for each",
+#         "analyze all",
+#         "create report from",
+#         "process multiple",
+#         "batch",
+#         "aggregate"
+#     ]
+#     return any(indicator in message.content.lower() for indicator in indicators)
+
+# // ...existing code...
