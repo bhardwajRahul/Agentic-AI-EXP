@@ -105,9 +105,11 @@ def build_graph(tool_sets, checkpointer):
                     logger.info(f"➡ Supervisor Routing to: {step}")
                     return {"next": step, "messages": [response]}
                 except Exception as e:
-                    response = f"Error in json parsing: {e}"
+                    response = (
+                        f"Error in json parsing tried to route to other agent: {e}"
+                    )
                     return {
-                        "next": "FINISH",
+                        "next": "supervisor",
                         "messages": [response],
                     }
 
@@ -132,7 +134,7 @@ def build_graph(tool_sets, checkpointer):
         except Exception as e:
             logger.error(f"Error in supervisor_node: {e}")
             output = f"Error in supervisor_node: {e}"
-            return {"next": "FINISH", "messages": output}
+            return {"next": "supervisor", "messages": output}
 
     builder = StateGraph(State)
 
@@ -169,6 +171,7 @@ def build_graph(tool_sets, checkpointer):
             "planning_agent": "planning_agent",
             "content_agent": "content_agent",
             "supervisor_tools": "supervisor_tools",
+            "supervisor": "supervisor",  # for tool fail fallback to same node and ask the LLM to re-decide
             "FINISH": END,
         },
     )
