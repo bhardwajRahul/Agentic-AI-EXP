@@ -23,7 +23,7 @@ REQUEST_TIMEOUT = 30
 MAX_TOKENS = 2000
 TOKEN_STRATEGY = "last"
 
-DEFAULT_THREAD_ID = "gmail_thread_138"
+DEFAULT_THREAD_ID = os.getenv("DEFAULT_THREAD_ID", "default_thread")
 
 communication_config = {
     "communication": {

@@ -47,6 +47,7 @@ async def main():
             "communication": communication_tools,
             "planning": planning_tools,
             "content": content_tools,
+            "supervisor": supervisor_tools,
         }
 
         async with aiosqlite.connect(str(DB_PATH)) as connection:

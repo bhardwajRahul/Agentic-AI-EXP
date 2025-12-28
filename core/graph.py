@@ -1,7 +1,8 @@
 from langchain_core.messages import SystemMessage, trim_messages, AIMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.prebuilt import ToolNode
-
+import re
+import json
 from config.prompts import (
     COMMUNICATION_SYSTEM_PROMPT,
     PLANNING_SYSTEM_PROMPT,
@@ -21,11 +22,12 @@ def build_graph(tool_sets, checkpointer):
     communication_tools = tool_sets["communication"]
     planning_tools = tool_sets["planning"]
     content_tools = tool_sets["content"]
+    supervisor_tools = tool_sets["supervisor"]
 
     communication_llm = build_llm_with_tools(communication_tools)
     planning_llm = build_llm_with_tools(planning_tools)
     content_llm = build_llm_with_tools(tools=content_tools)
-    supervisor_llm = build_llm_with_tools([])
+    supervisor_llm = build_llm_with_tools(supervisor_tools)
 
     communication_agent_node = agent_node_factory(
         communication_llm, COMMUNICATION_SYSTEM_PROMPT, "communication Agent"
@@ -39,7 +41,12 @@ def build_graph(tool_sets, checkpointer):
         agent_name="content Agent",
     )
 
-    def supervisor_node(state: State):
+    def supervisor_node(
+        state: State,
+        llm_with_tools=supervisor_llm,
+        system_prompt=SUPERVISOR_SYSTEM_PROMPT,
+        agent_name="supervisor",
+    ):
         request_counter["count"] += 1
         request_num = request_counter["count"]
 
@@ -64,41 +71,68 @@ def build_graph(tool_sets, checkpointer):
         logger.info("=" * 80)
 
         try:
-            router = supervisor_llm.with_structured_output(Route)
-            response = router.invoke(
-                [SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)] + state["messages"]
-            )
+            system_msg = SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)
+            response = supervisor_llm.invoke([system_msg] + state["messages"])
 
-            logger.info("=" * 80)
-            logger.info(f"➡ Routing to: {response.step}")
+            # CASE A: The Supervisor wants to use a Tool (e.g., Search)
+            if response.tool_calls:
+                logger.info(
+                    f"🔎 Supervisor is researching: {len(response.tool_calls)} tool calls"
+                )
+                for i, tool_call in enumerate(response.tool_calls, 1):
+                    logger.info(f"   Tool #{i}:")
+                    logger.info(f"      Name: {tool_call.get('name', 'N/A')}")
+                    logger.info(
+                        f"      Args: {json.dumps(tool_call.get('args', {}), indent=10)}"
+                    )
+                    logger.info(f"      ID: {tool_call.get('id', 'N/A')}")
 
-            # supervisor_message = AIMessage(
-            #     content=f"[SUPERVISOR ROUTING] Delegating task to: {response.step}",
-            #     name="supervisor",
-            # )
+                return {
+                    "next": "supervisor_tools",  # New internal route
+                    "messages": [response],
+                }
 
+            # CASE B: The Supervisor outputted Text (Routing JSON or Direct Reply)
+            content = response.content
+
+            json_match = re.search(r"\{.*\}", content, re.DOTALL)
+
+            if json_match:
+                try:
+                    parsed = json.loads(json_match.group(0))
+                    step = parsed.get("step", "FINISH")
+
+                    logger.info(f"➡ Supervisor Routing to: {step}")
+                    return {"next": step, "messages": [response]}
+                except Exception as e:
+                    response = f"Error in json parsing: {e}"
+                    return {
+                        "next": "FINISH",
+                        "messages": [response],
+                    }
+
+            # CASE C: Direct Reply (No Tools, No JSON)
+            # The Supervisor decided to answer the user directly
+            logger.info("🗣️ Supervisor responding directly")
+            if (
+                hasattr(response, "content")
+                and response.content
+                and not response.tool_calls
+            ):
+                content_preview = (
+                    response.content[:1000] + "..."
+                    if len(response.content) > 1000
+                    else response.content
+                )
+                logger.info(f"📄 Response content: {content_preview}")
             return {
-                "next": response.step,
-                # "messages": [supervisor_message], right know i think this info makes no use to the context window so keep it as backup if supervisor halucinates
+                "next": "FINISH",  # Or loop back to Human
+                "messages": [response],
             }
-
         except Exception as e:
-            logger.warning(f"⚠️ Structured output failed: {e}")
-
-            error_message = AIMessage(
-                content=f"[SUPERVISOR ERROR] Routing failed: {e}. Defaulting to FINISH.",
-                name="supervisor",
-            )
-            # can add a regex string matching to overcome this kind of problem and use pydantic here why not
-            response = Route(step="FINISH")
-
-            logger.info("=" * 80)
-            logger.info(f"➡ Routing to (fallback): {response.step}")
-
-            return {
-                "next": response.step,
-                "messages": [error_message],
-            }
+            logger.error(f"Error in supervisor_node: {e}")
+            output = f"Error in supervisor_node: {e}"
+            return {"next": "FINISH", "messages": output}
 
     builder = StateGraph(State)
 
@@ -120,6 +154,10 @@ def build_graph(tool_sets, checkpointer):
         "content_tools",
         ToolNode(tools=content_tools, handle_tool_errors=True),
     )
+    builder.add_node(
+        "supervisor_tools",
+        ToolNode(tools=supervisor_tools, handle_tool_errors=True),
+    )
 
     builder.add_edge(START, "supervisor")
 
@@ -130,9 +168,12 @@ def build_graph(tool_sets, checkpointer):
             "communication_agent": "communication_agent",
             "planning_agent": "planning_agent",
             "content_agent": "content_agent",
+            "supervisor_tools": "supervisor_tools",
             "FINISH": END,
         },
     )
+
+    builder.add_edge("supervisor_tools", "supervisor")
 
     builder.add_conditional_edges(
         "communication_agent",

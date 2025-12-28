@@ -17,7 +17,10 @@ class Route(BaseModel):
     """Routing decision for the supervisor"""
 
     step: Literal[
-        "communication_agent", "planning_agent", "content_agent", "FINISH"
+        "communication_agent",
+        "planning_agent",
+        "content_agent",
+        "FINISH",
     ] = Field(
         description="The next agent to route to, or FINISH if done no other response other than these is allowed"
     )
