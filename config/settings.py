@@ -13,10 +13,12 @@ CONTENT_SERVER = BASE_DIR / "MCP" / "core" / "content_server.py"
 SUPERVISOR_SERVER = BASE_DIR / "MCP" / "core" / "supervisor_server.py"
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 
-DEFAULT_MODEL = "openai/gpt-oss-20b:free"
+DEFAULT_MODEL = "openai/gpt-oss-20b"
 MAX_RETRIES = 3
 REQUEST_TIMEOUT = 30
 
