@@ -80,7 +80,9 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 
         if hasattr(msg, "content") and msg.content and not msg.tool_calls:
             content_preview = (
-                msg.content[:1000] + "..." if len(msg.content) > 1000 else msg.content
+                msg.content[:1000] + "..."
+                if len(msg.content) > 1000000
+                else msg.content
             )
             logger.info(f"📄 Response content: {content_preview}")
 

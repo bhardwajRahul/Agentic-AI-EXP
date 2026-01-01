@@ -123,7 +123,7 @@ def build_graph(tool_sets, checkpointer):
             ):
                 content_preview = (
                     response.content[:1000] + "..."
-                    if len(response.content) > 1000
+                    if len(response.content) > 100000
                     else response.content
                 )
                 logger.info(f"📄 Response content: {content_preview}")
