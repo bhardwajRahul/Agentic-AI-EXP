@@ -96,9 +96,6 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         logger.info("=" * 80)
 
         if hasattr(msg, "tool_calls") and msg.tool_calls:  # prevent hallucination
-            logger.info(
-                "🔧 Tool call detected - STRIPPING content to prevent hallucination"
-            )
             msg.content = ""
 
         agent_message = AIMessage(
