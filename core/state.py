@@ -43,12 +43,14 @@ def internal_agent_route(state: State) -> str:
             logger.info("✅ Detected FINAL ANSWER - returning to supervisor")
             return "supervisor"
 
-    if (
-        hasattr(last_message, "content")
-        and "CLARIFICATION NEEDED:" in last_message.content
-    ):
-        logger.info("❓ Clarification needed - routing to human")
-        return "ASK"
+    if hasattr(last_message, "content") and isinstance(last_message.content, str):
+        if "CLARIFICATION NEEDED:" in last_message.content.upper():
+            logger.info("❓ Clarification needed - routing to human")
+            return "ASK"
+
+        if "TALK TO USER:" in last_message.content.upper():
+            logger.info("💬 Agent wants to talk to user - routing to human")
+            return "ASK"
 
     logger.info("📤 No tools/clarification - returning to supervisor")
     return "supervisor"

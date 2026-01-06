@@ -31,15 +31,15 @@ def build_graph(tool_sets, checkpointer):
     supervisor_llm = build_llm_with_tools(supervisor_tools)
 
     communication_agent_node = agent_node_factory(
-        communication_llm, COMMUNICATION_SYSTEM_PROMPT, "communication Agent"
+        communication_llm, COMMUNICATION_SYSTEM_PROMPT, "communication_agent"
     )
     planning_agent_node = agent_node_factory(
-        planning_llm, PLANNING_SYSTEM_PROMPT, "planning Agent"
+        planning_llm, PLANNING_SYSTEM_PROMPT, "planning_agent"
     )
     content_agent_node = agent_node_factory(
         llm_with_tools=content_llm,
         system_prompt=CONTENT_SYSTEM_PROMPT,
-        agent_name="content Agent",
+        agent_name="content_agent",
     )
 
     def supervisor_node(
