@@ -14,6 +14,7 @@ from googleapiclient.errors import HttpError
 
 from MCP.auth.service_decoder import get_google_service
 from MCP.core.server_init import communication_server
+from utils.tools_helper import clean_email_body
 
 from MCP.helper.pydantic_models import (
     EmailAddress,
@@ -143,7 +144,6 @@ async def open_email(email_id: str) -> dict[str, Any]:
 
     Returns:
         Dict with 'success' boolean or error message
-
     """
     try:
         request = EmailAddress(email=email_id)
@@ -175,6 +175,7 @@ async def get_unread_emails(date: int = 7, max_results: int = 20) -> dict[str, A
     Note:
         Only searches the primary inbox category to avoid clutter.
     """
+
     try:
         request = UnreadEmailsRequest(date=date, max_results=max_results)
     except Exception as e:
@@ -218,12 +219,16 @@ async def get_unread_emails(date: int = 7, max_results: int = 20) -> dict[str, A
                 email_details = {
                     "id": email_id,
                     "thread_id": msg["threadId"],
-                    "snippet": full_msg.get("snippet", ""),
-                    "labels": full_msg.get("labelIds", []),
-                    "size": full_msg.get("sizeEstimate", 0),
-                    "internal_date": full_msg.get("internalDate"),
+                    "snippet": clean_email_body(full_msg.get("snippet", "")),
+                    # "labels": full_msg.get("labelIds", []),
+                    # "size": full_msg.get("sizeEstimate", 0),
+                    # "internal_date": full_msg.get("internalDate"),
                     "subject": next(
-                        (h["value"] for h in headers if h["name"] == "Subject"),
+                        (
+                            clean_email_body(h["value"])
+                            for h in headers
+                            if h["name"] == "Subject"
+                        ),
                         "No Subject",
                     ),
                     "from": next(
@@ -307,7 +312,7 @@ async def read_email(email_id: str) -> dict[str, Any]:
         )
 
         return ReadEmailResponse(
-            content=body or "",
+            content=clean_email_body(body) or "",
             subject=decode_mime_header(mime_message.get("subject", "")),
             from_=mime_message.get("from", ""),
             to=mime_message.get("to", ""),

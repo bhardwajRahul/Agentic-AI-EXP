@@ -48,9 +48,9 @@ class EmailMetadata(BaseModel):
     id: str
     thread_id: str
     snippet: str
-    labels: List[str]
-    size: int
-    internal_date: Optional[str]
+    # labels: List[str]
+    # size: int
+    # internal_date: Optional[str]
     subject: str
     from_: str = Field(..., alias="from")
     date: str
