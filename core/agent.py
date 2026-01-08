@@ -1,32 +1,26 @@
 import json
-from datetime import datetime
 import httpx
 
-import pytz
 from langchain_core.messages import (
     AIMessage,
     SystemMessage,
     trim_messages,
 )
 
-from utils.context_manager import slim_messages
 from core.state import State
 from utils.context_manager import sanitize_history
 from utils.helper import request_counter, setup_logger
-from utils.helper import count_tokens
+from utils.helper import count_tokens, get_current_time
 
 logger = setup_logger(__name__)
-
-
-def get_current_time():
-    now = datetime.now(pytz.timezone("Asia/Kolkata"))
-    return now.strftime("%Y-%m-%d %H:%M:%S IST")
 
 
 def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
     def agent_node(state: State):
         request_counter["count"] += 1
         request_num = request_counter["count"]
+
+        current_time = get_current_time()
 
         logger.info("=" * 80)
         logger.info(f"🔄 LLM REQUEST #{request_num}")
@@ -50,7 +44,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             content_preview = json.dumps(content_preview[-10:], indent=2)
             logger.info(f"📝 Content preview: {content_preview}")
 
-        messages = [SystemMessage(content=system_prompt)] + slim_messages(last_messages)
+        messages = [SystemMessage(content=system_prompt)] + last_messages
 
         logger.info("=" * 80)
 
@@ -62,8 +56,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
                 return {
                     "messages": [
                         AIMessage(
-                            content="[ERROR] Rate limit reached. Please retry later.",
-                            name=agent_name,
+                            content=f"[{current_time}] [{agent_name}] [ERROR] Rate limit reached. Please retry later.",
                         )
                     ]
                 }
@@ -74,8 +67,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             return {
                 "messages": [
                     AIMessage(
-                        content="[ERROR] Network unavailable. Check connection.",
-                        name=agent_name,
+                        content=f"[{current_time}] [{agent_name}] [ERROR] Network unavailable. Check connection.",
                     )
                 ]
             }
@@ -83,12 +75,10 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             logger.error(f"Unexpected error: {e}")
             raise
 
-        current_time = get_current_time()
-
         raw_content = msg.content if msg.content else ""
 
         if raw_content:
-            final_content = f"[{current_time}] {raw_content}"
+            final_content = f"[{current_time}] [{agent_name}] {raw_content}"
         else:
             final_content = raw_content
 
@@ -112,12 +102,12 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             )
             logger.info(f"📄 Response content: {content_preview}")
 
-        if hasattr(msg, "usage_metadata") and msg.usage_metadata:
-            usage = msg.usage_metadata
-            logger.info("📈 Token usage:")
-            logger.info(f"   Input tokens: {usage.get('input_tokens', 'N/A')}")
-            logger.info(f"   Output tokens: {usage.get('output_tokens', 'N/A')}")
-            logger.info(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
+        # if hasattr(msg, "usage_metadata") and msg.usage_metadata:
+        #     usage = msg.usage_metadata
+        #     logger.info("📈 Token usage:")
+        #     logger.info(f"   Input tokens: {usage.get('input_tokens', 'N/A')}")
+        #     logger.info(f"   Output tokens: {usage.get('output_tokens', 'N/A')}")
+        #     logger.info(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
 
         logger.info("=" * 80)
 
@@ -127,7 +117,6 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         agent_message = AIMessage(
             content=final_content,
             tool_calls=getattr(msg, "tool_calls", []),
-            additional_kwargs={"name": agent_name},
         )
 
         return {"messages": [agent_message]}

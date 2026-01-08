@@ -73,6 +73,8 @@ def build_llm():
 
 # from langchain_core.tools import BaseTool
 
+# from config.settings import GROQ_API_KEY
+
 # HF_API_KEY = os.environ.get("HF_TOKEN")
 # HF_BASE_URL = "https://router.huggingface.co/v1"
 
@@ -88,7 +90,15 @@ def build_llm():
 #         timeout=60,
 #     )
 
-#     if not tools:
-#         return llm
-
 #     return llm.bind_tools(tools)
+
+
+# def build_llm():
+#     llm = ChatOpenAI(
+#         model=MODEL_NAME,
+#         openai_api_key=HF_API_KEY,
+#         openai_api_base=HF_BASE_URL,
+#         max_retries=3,
+#         timeout=60,
+#     )
+#     return llm

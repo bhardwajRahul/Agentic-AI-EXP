@@ -18,52 +18,10 @@ def summarize_tool_result(messages, prompt):
 
 def summarize_history(messages):
     llm = build_llm()
-    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + slim_messages(
-        messages
-    )
+    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + messages
     cleaned = llm.invoke(messages)
     cleaned_history = cleaned.content
     return cleaned_history
-
-
-def slim_messages(
-    messages,
-):  # instead of this need to create my own pydantic model that would be better suited for storage
-    slim = []
-
-    for m in messages:
-        if isinstance(m, HumanMessage):
-            slim.append({"role": "user", "content": m.content})
-
-        elif isinstance(m, AIMessage):
-            additional_kwargs = m.additional_kwargs if m.additional_kwargs else {}
-            agent_name = additional_kwargs.get("name", "unknown_agent")
-            slim.append(
-                {
-                    "role": "assistant",
-                    "content": m.content,
-                    "agent_name": agent_name,
-                    "tool_calls": m.tool_calls or [],
-                }
-            )
-
-        elif isinstance(
-            m, SystemMessage
-        ):  # this is never stored in the context actually
-            slim.append({"role": "system", "content": m.content})
-
-        elif isinstance(m, ToolMessage):
-            slim.append(
-                {
-                    "role": "tool",
-                    "tool_call_id": m.tool_call_id,
-                    "tool_name": m.name,
-                    "content": m.content,
-                    "status": m.status,
-                }
-            )
-
-    return slim
 
 
 def sanitize_history(messages):
@@ -79,7 +37,7 @@ def sanitize_history(messages):
             entry = {
                 "role": "assistant",
                 "content": msg.content or "",
-                "agent_name": getattr(msg, "additional_kwargs", {}),
+                "agent_name": "u",
             }
 
             if msg.tool_calls:

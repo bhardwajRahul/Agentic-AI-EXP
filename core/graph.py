@@ -14,9 +14,7 @@ from core.agent import agent_node_factory
 from core.llm import build_llm_with_tools
 from core.state import State, route_after_supervisor, internal_agent_route, route_start
 from utils.helper import request_counter, setup_logger
-from utils.helper import count_tokens
-from utils.context_manager import slim_messages
-
+from utils.helper import count_tokens, get_current_time
 
 logger = setup_logger(__name__)
 
@@ -33,10 +31,10 @@ def build_graph(tool_sets, checkpointer):
     supervisor_llm = build_llm_with_tools(supervisor_tools)
 
     communication_agent_node = agent_node_factory(
-        communication_llm, COMMUNICATION_SYSTEM_PROMPT, "communication_agent"
+        communication_llm, COMMUNICATION_SYSTEM_PROMPT, agent_name="communication_agent"
     )
     planning_agent_node = agent_node_factory(
-        planning_llm, PLANNING_SYSTEM_PROMPT, "planning_agent"
+        planning_llm, PLANNING_SYSTEM_PROMPT, agent_name="planning_agent"
     )
     content_agent_node = agent_node_factory(
         llm_with_tools=content_llm,
@@ -52,6 +50,8 @@ def build_graph(tool_sets, checkpointer):
     ):
         request_counter["count"] += 1
         request_num = request_counter["count"]
+
+        current_time = get_current_time()
 
         logger.info("=" * 80)
         logger.info(f"👮 SUPERVISOR REQUEST #{request_num}")
@@ -75,9 +75,7 @@ def build_graph(tool_sets, checkpointer):
 
         try:
             system_msg = SystemMessage(content=SUPERVISOR_SYSTEM_PROMPT)
-            response = supervisor_llm.invoke(
-                [system_msg] + slim_messages(last_messages)
-            )
+            response = supervisor_llm.invoke([system_msg] + last_messages)
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 429:
                 logger.error("🚫 Rate limit hit in supervisor - stopping")
@@ -85,8 +83,7 @@ def build_graph(tool_sets, checkpointer):
                     "next": "FINISH",
                     "messages": [
                         AIMessage(
-                            content="[ERROR] Rate limit reached.",
-                            additional_kwargs={"name": agent_name},
+                            content=f"[{current_time}] [supervisor] [ERROR] Rate limit reached.",
                         )
                     ],
                 }
@@ -95,8 +92,7 @@ def build_graph(tool_sets, checkpointer):
                 "next": "FINISH",
                 "messages": [
                     AIMessage(
-                        content=f"[ERROR] {e}",
-                        additional_kwargs={"name": agent_name},
+                        content=f"[{current_time}] [supervisor] [ERROR] {e}",
                     )
                 ],
             }
@@ -106,8 +102,7 @@ def build_graph(tool_sets, checkpointer):
                 "next": "FINISH",
                 "messages": [
                     AIMessage(
-                        content="[ERROR] Network unavailable.",
-                        additional_kwargs={"name": agent_name},
+                        content=f"[{current_time}] [supervisor] [ERROR] Network unavailable.",
                     )
                 ],
             }
@@ -117,7 +112,7 @@ def build_graph(tool_sets, checkpointer):
                 "next": "supervisor",
                 "messages": [
                     AIMessage(
-                        content=f"Error: {e}", additional_kwargs={"name": agent_name}
+                        content=f"[{current_time}] [supervisor] [ERROR] {e}",
                     ),
                 ],
             }
@@ -136,9 +131,8 @@ def build_graph(tool_sets, checkpointer):
                 logger.info(f"      ID: {tool_call.get('id', 'N/A')}")
 
             agent_message = AIMessage(
-                content=response.content,
+                content=f"[{current_time}] [supervisor] {response.content}",
                 tool_calls=getattr(response, "tool_calls", []),
-                additional_kwargs={"name": agent_name},
             )
 
             return {
@@ -157,7 +151,6 @@ def build_graph(tool_sets, checkpointer):
 
                 agent_message = AIMessage(
                     content=response.content,
-                    additional_kwargs={"name": agent_name},
                 )
 
                 logger.info(f"➡ Supervisor Routing to: {step}")
@@ -166,8 +159,7 @@ def build_graph(tool_sets, checkpointer):
                 response = f"Error in json parsing tried to route to other agent: {e}"
 
                 agent_message = AIMessage(
-                    content=response,
-                    additional_kwargs={"name": agent_name},
+                    content=f"[{current_time}] [supervisor] {response}",
                 )
 
                 return {
@@ -190,8 +182,7 @@ def build_graph(tool_sets, checkpointer):
             )
             logger.info(f"📄 Response content: {content_preview}")
             agent_message = AIMessage(
-                content=response.content,
-                additional_kwargs={"name": agent_name},
+                content=f"[{current_time}] [supervisor] {response.content}",
             )
             return {
                 "next": "FINISH",  # Or loop back to Human

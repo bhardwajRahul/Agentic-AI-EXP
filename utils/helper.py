@@ -2,6 +2,8 @@ import logging
 import sqlite3
 from config.settings import DB_PATH
 import tiktoken
+from datetime import datetime
+import pytz
 
 
 def count_tokens(messages):
@@ -43,3 +45,8 @@ def delete_thread_from_db(thread_id: str):
     conn.commit()
     conn.close()
     print(f"✅ Deleted {deleted} messages from thread: {thread_id}")
+
+
+def get_current_time():
+    now = datetime.now(pytz.timezone("Asia/Kolkata"))
+    return now.strftime("%Y-%m-%d %H:%M:%S IST")
