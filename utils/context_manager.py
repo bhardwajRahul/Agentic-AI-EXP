@@ -3,12 +3,12 @@ from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, System
 from config.prompts import HISTORY_SUMMARIZE_PROMPT
 
 
-def summarize_context(messages):
+def summarize_tool_result(messages, prompt):
     """Summarize the context from the message history"""
 
     llm = build_llm()
 
-    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + messages
+    messages = [SystemMessage(content=prompt)] + [messages]
 
     cleaned = llm.invoke(messages)
     cleaned_history = cleaned.content
@@ -16,7 +16,19 @@ def summarize_context(messages):
     return cleaned_history
 
 
-def slim_messages(messages):
+def summarize_history(messages):
+    llm = build_llm()
+    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + slim_messages(
+        messages
+    )
+    cleaned = llm.invoke(messages)
+    cleaned_history = cleaned.content
+    return cleaned_history
+
+
+def slim_messages(
+    messages,
+):  # instead of this need to create my own pydantic model that would be better suited for storage
     slim = []
 
     for m in messages:

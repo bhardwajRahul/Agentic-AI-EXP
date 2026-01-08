@@ -193,10 +193,10 @@ def build_graph(tool_sets, checkpointer):
                 content=response.content,
                 additional_kwargs={"name": agent_name},
             )
-        return {
-            "next": "FINISH",  # Or loop back to Human
-            "messages": [agent_message],
-        }
+            return {
+                "next": "FINISH",  # Or loop back to Human
+                "messages": [agent_message],
+            }
 
     builder = StateGraph(State)
 
