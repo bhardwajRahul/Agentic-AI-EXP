@@ -13,6 +13,8 @@ from utils.context_manager import sanitize_history
 from utils.helper import request_counter, setup_logger
 from utils.helper import count_tokens, get_current_time
 from utils.context_manager import summarize_history
+from config.prompts import HISTORY_SUMMARIZE_PROMPT
+from core.llm import build_llm
 
 
 logger = setup_logger(__name__)
@@ -140,9 +142,13 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 def summerizer_node(state: State):
     logger.info("📝 Summarizer node activated to condense conversation history.")
 
-    messages = state["summary"] + state["messages"][:-25]
+    messages = state.get("summary") + state["messages"][:-25]
 
-    summarized_content = summarize_history(messages)
+    llm = build_llm()
+    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + messages
+    cleaned = llm.invoke(messages)
+
+    summarized_content = cleaned.content
 
     delete_actions = [RemoveMessage(id=m.id) for m in messages]
 

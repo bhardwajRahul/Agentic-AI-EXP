@@ -1,6 +1,5 @@
 from core.llm import build_llm
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
-from config.prompts import HISTORY_SUMMARIZE_PROMPT
 
 
 def summarize_tool_result(messages, prompt):
@@ -13,14 +12,6 @@ def summarize_tool_result(messages, prompt):
     cleaned = llm.invoke(messages)
     cleaned_history = cleaned.content
 
-    return cleaned_history
-
-
-def summarize_history(messages):
-    llm = build_llm()
-    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + messages
-    cleaned = llm.invoke(messages)
-    cleaned_history = cleaned.content
     return cleaned_history
 
 
