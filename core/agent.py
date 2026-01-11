@@ -141,7 +141,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 
 def code_execution_factory(llm, tool_sets, agent_name: str):
     def code_executor(state: State):
-        current_time = get_current_time()
+        current_time = get_current_time()  # system prompt should have this need to do
 
         last_messages = trim_messages(
             state["messages"],
@@ -156,7 +156,6 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
             agent = CodeExecutionAgent(llm, tool_sets)
             required = list(tool_sets.keys())
 
-            # ✅ Run async method synchronously
             import asyncio
 
             try:

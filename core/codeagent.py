@@ -48,17 +48,65 @@ class CodeExecutionAgent:
                 active_tools.extend(tools)
 
         for tool in active_tools:
-            # Create a simple wrapper for the tool
+            # Create an async wrapper for the tool
             def make_wrapper(t):
-                def wrapper(**kwargs):
+                async def wrapper(**kwargs):
                     logger.info(f"⚙️ Executing Tool: {t.name}")
-                    if hasattr(t, "run"):
-                        return t.run(kwargs)
-                    return t(kwargs)
+                    logger.info(f"   Parameters: {kwargs}")  # ✅ Add this
+                    try:
+                        if hasattr(t, "ainvoke"):
+                            result = await t.ainvoke(kwargs)
+                        elif hasattr(t, "arun"):
+                            result = await t.arun(kwargs)
+                        elif hasattr(t, "run"):
+                            result = t.run(kwargs)
+                        else:
+                            result = t(kwargs)
+
+                        # ✅ Log the raw result
+                        logger.info(f"   Raw result type: {type(result)}")
+                        logger.info(f"   Raw result: {str(result)[:200]}...")
+
+                        # Parse string results into dict
+                        if isinstance(result, str):
+                            import json
+
+                            try:
+                                result = json.loads(result)
+                                logger.info(f"   Parsed as JSON successfully")
+                            except json.JSONDecodeError:
+                                logger.warning(
+                                    f"   Could not parse as JSON, wrapping in dict"
+                                )
+                                result = {
+                                    "success": True,
+                                    "data": result,
+                                    "raw_output": result,
+                                }
+
+                        return result
+
+                    except Exception as e:
+                        # Return error in a safe format
+                        error_msg = str(e)
+                        logger.error(f"Tool {t.name} failed: {error_msg}")
+
+                        return {
+                            "error": error_msg,
+                            "success": False,
+                            "count": 0,
+                            "emails": [],
+                            "message": f"Tool execution failed: {error_msg[:200]}",
+                        }
 
                 return wrapper
 
             tool_map[tool.name] = make_wrapper(tool)
+
+        logger.info(f"🔧 Created tool map with {len(tool_map)} tools")
+        for name in tool_map.keys():
+            logger.info(f"   - {name}")
+
         return tool_map
 
     async def _execute_locally(
@@ -78,16 +126,42 @@ class CodeExecutionAgent:
             exec(code, global_scope)
 
             if "execute_workflow" not in global_scope:
-                return {"error": "Function 'execute_workflow' missing."}
+                return {
+                    "status": "error",
+                    "error": "Function 'execute_workflow' missing in generated code",
+                    "summary": "Code generation failed",
+                }
 
             func = global_scope["execute_workflow"]
 
+            # Execute the async function
             if asyncio.iscoroutinefunction(func):
-                return await func()
-            return func()
+                result = await func()
+            else:
+                logger.warning("execute_workflow is not async, running synchronously")
+                result = func()
+
+            # Ensure result has required fields
+            if not isinstance(result, dict):
+                return {
+                    "status": "error",
+                    "error": f"execute_workflow returned {type(result)}, expected dict",
+                    "summary": "Invalid return type",
+                }
+
+            # Add status if missing
+            if "status" not in result:
+                result["status"] = "success"
+
+            return result
 
         except Exception as e:
-            return {"error": str(e)}
+            logger.error(f"Execution error: {e}", exc_info=True)
+            return {
+                "status": "error",
+                "error": str(e),
+                "summary": f"Execution failed: {str(e)[:100]}",
+            }
 
     async def _resolve_intent(
         self, messages: List[BaseMessage], available_tools: List[str]
@@ -219,36 +293,67 @@ class CodeExecutionAgent:
         PREVIOUS ERROR (Fix this if present):
         {spec.last_error or "None"}
         
-        AVAILABLE TOOLS:
+        AVAILABLE TOOLS (ALL ARE ASYNC):
         {self._format_schemas(schemas)}
 
-            Requirements:
-            1. You CANNOT use `input()` or interactive commands.
-            2. You MUST use the provided MCP tools for external actions.
-            3. DO NOT HALLUCINATE OR SIMULATE DATA. You must call the tool functions to get real data.
-            4. If you need to search, call the search tool. Do not return hardcoded examples.
-            5. Return a dictionary with 'summary', 'details', 'artifacts'.
-            
-            follow this template strictly:
-            ```python
-            import asyncio
-            from typing import Dict, Any
+        Requirements:
+        1. You CANNOT use `input()` or interactive commands.
+        2. You MUST use the provided MCP tools for external actions.
+        3. ALL TOOL CALLS MUST BE AWAITED: `result = await tool_name(**params)`
+        4. ALWAYS CHECK FOR ERRORS in tool results before processing.
+        5. Return a dictionary with 'summary', 'details', 'artifacts'.
+        
+        CRITICAL: Every tool call must:
+        - Use `await`
+        - Check for errors before processing results
+        
+        Example error handling:
+        ```python
+        result = await get_unread_emails(date=0)
+        
+        # ✅ Always check for errors
+        if result.get("error") or not result.get("success", True):
+            return {{
+                "summary": f"Failed: {{result.get('error', 'Unknown error')}}",
+                "details": {{"error": result.get("error")}},
+                "artifacts": []
+            }}
+        
+        # Now safe to use result
+        emails = result.get("emails", [])
+        ```
+        
+        Follow this template strictly:
+        ```python
+        import asyncio
+        from typing import Dict, Any, List
 
-            async def execute_workflow() -> Dict[str, Any]:
-                # Step 1: Initialize clients
-                # Step 2: Perform logic based on PREVIOUS CONTEXT and CURRENT TASK
-                
+        async def execute_workflow() -> Dict[str, Any]:
+            # Step 1: Call tool with await
+            result = await tool_name(param1="value")
+            
+            # Step 2: Check for errors
+            if result.get("error"):
                 return {{
-                    "summary": "...", 
-                    "details": {{}},
+                    "summary": f"Tool failed: {{result['error']}}",
+                    "details": {{"error": result["error"]}},
                     "artifacts": []
                 }}
             
-            if __name__ == "__main__":
-                result = asyncio.run(execute_workflow())
-                print(result)
-            ```
-            """
+            # Step 3: Process successful results
+            data = result.get("data", [])
+            
+            return {{
+                "summary": f"Successfully processed {{len(data)}} items", 
+                "details": {{"count": len(data), "items": data}},
+                "artifacts": []
+            }}
+        
+        if __name__ == "__main__":
+            result = asyncio.run(execute_workflow())
+            print(result)
+        ```
+        """
 
     async def _generate_code(self, prompt: str) -> str:
         """Generate code using LLM"""
@@ -257,7 +362,7 @@ class CodeExecutionAgent:
         # Extract code block
         code = self._extract_code_block(response.content)
 
-        logger.info(f"Generated code:\n{code[:]}...")
+        logger.info(f"Generated code:\n{code[:]}")
         return code
 
     async def _execute_in_sandbox(self, code: str) -> Dict[str, Any]:
