@@ -30,7 +30,7 @@ def build_graph(tool_sets, checkpointer):
     planning_llm = build_llm_with_tools(planning_tools)
     content_llm = build_llm_with_tools(tools=content_tools)
     supervisor_llm = build_llm_with_tools(supervisor_tools)
-    code_agent_llm = build_llm(MODEL=DEFAULT_OPEN_CODE_MODEL)
+    code_agent_llm = build_llm()
 
     communication_agent_node = agent_node_factory(
         communication_llm, COMMUNICATION_SYSTEM_PROMPT, agent_name="communication_agent"

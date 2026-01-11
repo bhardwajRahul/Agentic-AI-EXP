@@ -1,5 +1,6 @@
 import json
 import httpx
+import asyncio
 
 from langchain_core.messages import (
     AIMessage,
@@ -156,8 +157,6 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
             agent = CodeExecutionAgent(llm, tool_sets)
             required = list(tool_sets.keys())
 
-            import asyncio
-
             try:
                 loop = asyncio.get_event_loop()
             except RuntimeError:
@@ -180,7 +179,6 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
         raw_content = (
             f"Status: {msg.get('status', 'unknown')}\n"
             f"Summary: {msg.get('summary', 'No summary')}\n"
-            f"Error: {msg.get('error', 'None')}"
         )
 
         final_content = f"[{current_time}] [{agent_name}] {raw_content}"

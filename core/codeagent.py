@@ -1,10 +1,10 @@
+import json
+import re
 import asyncio
-import tempfile
 from pathlib import Path
-import subprocess
 from typing import Dict, Any, List, Callable
 from utils.helper import setup_logger
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage
 from core.state import TaskSpec
 
 logger = setup_logger(__name__)
@@ -17,27 +17,19 @@ class CodeExecutionAgent:
         self.sandbox_path = Path("D:/Agentic AI/core/sandbox")
         self.sandbox_path.mkdir(exist_ok=True)
 
-    async def execute_workflow(
-        self, messages: List[BaseMessage], available_tools: List[str]
-    ) -> Dict[str, Any]:
-        """
-        1. Parse History -> TaskSpec (Structured)
-        2. TaskSpec -> Python Code (Executable)
-        """
+    async def execute_workflow(self, messages: List[BaseMessage]) -> Dict[str, Any]:
+        task_spec = await self._resolve_intent(messages)
 
-        task_spec = await self._resolve_intent(
-            messages, available_tools=available_tools
-        )
+        logger.info(f"Task Specs: {task_spec}")
 
-        # 1. Create the Tool Map (Injects your real tools)
         tool_map = self._create_tool_map(task_spec.required_tools_hint)
 
         tool_schemas = await self._load_tool_schemas(task_spec.required_tools_hint)
+
         code_prompt = self._build_code_generation_prompt(task_spec, tool_schemas)
 
         generated_code = await self._generate_code(code_prompt)
 
-        # 2. Run with exec()
         return await self._execute_locally(generated_code, tool_map)
 
     def _create_tool_map(self, required_hints: List[str]) -> Dict[str, Callable]:
@@ -48,11 +40,11 @@ class CodeExecutionAgent:
                 active_tools.extend(tools)
 
         for tool in active_tools:
-            # Create an async wrapper for the tool
+
             def make_wrapper(t):
                 async def wrapper(**kwargs):
                     logger.info(f"⚙️ Executing Tool: {t.name}")
-                    logger.info(f"   Parameters: {kwargs}")  # ✅ Add this
+                    logger.info(f"   Parameters: {kwargs}")
                     try:
                         if hasattr(t, "ainvoke"):
                             result = await t.ainvoke(kwargs)
@@ -63,9 +55,8 @@ class CodeExecutionAgent:
                         else:
                             result = t(kwargs)
 
-                        # ✅ Log the raw result
                         logger.info(f"   Raw result type: {type(result)}")
-                        logger.info(f"   Raw result: {str(result)[:200]}...")
+                        logger.info(f"   Raw result: {str(result)}")
 
                         # Parse string results into dict
                         if isinstance(result, str):
@@ -73,10 +64,9 @@ class CodeExecutionAgent:
 
                             try:
                                 result = json.loads(result)
-                                logger.info(f"   Parsed as JSON successfully")
                             except json.JSONDecodeError:
                                 logger.warning(
-                                    f"   Could not parse as JSON, wrapping in dict"
+                                    "Could not parse as JSON, wrapping in dict"
                                 )
                                 result = {
                                     "success": True,
@@ -87,7 +77,6 @@ class CodeExecutionAgent:
                         return result
 
                     except Exception as e:
-                        # Return error in a safe format
                         error_msg = str(e)
                         logger.error(f"Tool {t.name} failed: {error_msg}")
 
@@ -104,15 +93,11 @@ class CodeExecutionAgent:
             tool_map[tool.name] = make_wrapper(tool)
 
         logger.info(f"🔧 Created tool map with {len(tool_map)} tools")
-        for name in tool_map.keys():
-            logger.info(f"   - {name}")
-
         return tool_map
 
     async def _execute_locally(
         self, code: str, tool_map: Dict[str, Callable]
     ) -> Dict[str, Any]:
-        # Inject tools into the script's global scope
         global_scope = {
             "Dict": Dict,
             "Any": Any,
@@ -134,14 +119,12 @@ class CodeExecutionAgent:
 
             func = global_scope["execute_workflow"]
 
-            # Execute the async function
             if asyncio.iscoroutinefunction(func):
                 result = await func()
             else:
                 logger.warning("execute_workflow is not async, running synchronously")
                 result = func()
 
-            # Ensure result has required fields
             if not isinstance(result, dict):
                 return {
                     "status": "error",
@@ -149,7 +132,6 @@ class CodeExecutionAgent:
                     "summary": "Invalid return type",
                 }
 
-            # Add status if missing
             if "status" not in result:
                 result["status"] = "success"
 
@@ -163,47 +145,71 @@ class CodeExecutionAgent:
                 "summary": f"Execution failed: {str(e)[:100]}",
             }
 
-    async def _resolve_intent(
-        self, messages: List[BaseMessage], available_tools: List[str]
-    ) -> TaskSpec:
-        """Extract task specification from conversation history"""
+    async def _resolve_intent(self, messages: List[BaseMessage]) -> TaskSpec:
+        system_prompt = """
+            You are a task analyzer. Your job is to extract structured intent from the conversation
+            and determine which tools are STRICTLY REQUIRED to complete the user's LATEST request.
 
-        system_prompt = f"""
-        You are a task analyzer. Extract structured information from this conversation.
-        
-        Return a JSON object with:
-        {{
-            "primary_goal": "What the user wants to accomplish",
+            Return a JSON object with EXACTLY this structure:
+            {
+            "primary_goal": "Clear, concise description of what the user wants to accomplish",
             "required_tools_hint": ["communication", "planning", "content"],
-            "context_variables": {{"key": "string value only"}},
+            "context_variables": {"key": "string value only"},
             "last_error": null
-        }}
-        the available tool types are: {available_tools} only use these.
-        
-        IMPORTANT: All values in context_variables MUST be strings, not booleans or numbers.
-        Example: {{"handled": "true"}} NOT {{"handled": true}}
-        
-        Focus on the LATEST user request and any errors.
-        """
+            }
 
-        # Get last 5 messages for context
-        recent_messages = messages[-5:]
+            ### TOOL SELECTION RULES (CRITICAL)
+
+            You MUST include a tool in "required_tools_hint" ONLY if the user's request
+            CANNOT be completed without that tool.
+
+            #### Tool eligibility rules:
+
+            1. "communication"
+            Include ONLY IF the user explicitly asks to:
+            - communicate with a person via email or chat
+
+            2. "planning"
+            Include ONLY IF the user explicitly asks to:
+            - create, update, delete, or view calendar events
+            - schedule or reschedule meetings
+            - manage tasks or reminders (Google Tasks)
+
+            3. "content"
+            Include ONLY IF the user explicitly asks to:
+            - create, edit, read, search, or share files
+            - work with Google Docs, Sheets, Slides, Forms
+            - access Google Drive content
+
+            4. If NONE of the above conditions are met:
+            - "required_tools_hint" MUST be an empty list []
+
+            ### IMPORTANT CONSTRAINTS
+
+            - Base your decision ONLY on the LATEST user request
+            - Ignore earlier intent unless it is unfinished or caused an error
+            - If the request can be answered by reasoning alone, return an empty tool list
+            - Never infer tools from intent like "prepare", "think", "draft", or "explain"
+            - If the user asks for advice or explanation ONLY, no tools are required
+
+            ### CONTEXT VARIABLES
+
+            - Include only values that are REQUIRED for downstream execution
+            - ALL values MUST be strings (no numbers, booleans, objects, or arrays)
+            """
+
+        recent_messages = messages
         conversation = "\n".join([f"{m.type}: {m.content}" for m in recent_messages])
 
         prompt = f"{system_prompt}\n\nConversation:\n{conversation}"
 
         response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
 
-        # Parse JSON from response
-        import json
-        import re
-
         json_match = re.search(r"\{.*\}", response.content, re.DOTALL)
         if json_match:
             try:
                 data = json.loads(json_match.group(0))
 
-                # ✅ Ensure all required fields exist with defaults
                 sanitized = {
                     "primary_goal": data.get("primary_goal", "Unknown goal"),
                     "required_tools_hint": data.get(
@@ -215,7 +221,6 @@ class CodeExecutionAgent:
                     else None,
                 }
 
-                # ✅ Sanitize context_variables - convert all values to strings
                 ctx = data.get("context_variables", {})
                 if isinstance(ctx, dict):
                     sanitized["context_variables"] = {k: str(v) for k, v in ctx.items()}
@@ -224,7 +229,6 @@ class CodeExecutionAgent:
             except Exception as e:
                 logger.error(f"TaskSpec creation failed: {e}")
 
-        # Fallback if parsing fails
         return TaskSpec(
             primary_goal=recent_messages[-1].content if recent_messages else "No goal",
             required_tools_hint=["communication"],
@@ -233,7 +237,6 @@ class CodeExecutionAgent:
         )
 
     async def _load_tool_schemas(self, tool_types: List[str]) -> Dict[str, Any]:
-        """Load only the schemas for required tool types"""
         schemas = {}
         for tool_type in tool_types:
             if tool_type in self.tool_sets:
@@ -303,10 +306,6 @@ class CodeExecutionAgent:
         4. ALWAYS CHECK FOR ERRORS in tool results before processing.
         5. Return a dictionary with 'summary', 'details', 'artifacts'.
         
-        CRITICAL: Every tool call must:
-        - Use `await`
-        - Check for errors before processing results
-        
         Example error handling:
         ```python
         result = await get_unread_emails(date=0)
@@ -356,13 +355,10 @@ class CodeExecutionAgent:
         """
 
     async def _generate_code(self, prompt: str) -> str:
-        """Generate code using LLM"""
         response = await self.llm.ainvoke([{"role": "user", "content": prompt}])
-
-        # Extract code block
         code = self._extract_code_block(response.content)
 
-        logger.info(f"Generated code:\n{code[:]}")
+        logger.info(f"Generated code:\n{code}")
         return code
 
     async def _execute_in_sandbox(self, code: str) -> Dict[str, Any]:
@@ -418,38 +414,35 @@ class CodeExecutionAgent:
                 "summary": f"Execution error: {e}",
             }
 
-    async def _summarize_results(self, execution_result: Dict) -> str:
-        """Extract only essential information to return to model"""
-        if "error" in execution_result:
-            return f"Execution failed: {execution_result['error']}"
-
-        # Return only the summary and key metrics, not full data
-        summary_parts = [execution_result.get("summary", "Task completed")]
-
-        if "details" in execution_result:
-            details = execution_result["details"]
-            summary_parts.append(f"Key metrics: {details}")
-
-        if "artifacts" in execution_result:
-            artifacts = execution_result["artifacts"]
-            summary_parts.append(f"Created: {len(artifacts)} artifacts")
-
-        return " | ".join(summary_parts)
-
-    # def _estimate_token_savings(self, full_output: Dict, summary: str) -> int:
-    #     """Estimate tokens saved by using code execution"""
-    #     # Rough estimate: 4 chars per token
-    #     full_tokens = len(str(full_output)) // 4
-    #     summary_tokens = len(summary) // 4
-    #     return full_tokens - summary_tokens
-
-    def _format_schemas(self, schemas: Dict) -> str:
-        """Format tool schemas for prompt"""
+    def _format_schemas(
+        self, schemas: Dict
+    ) -> str:  # need to check if they really better than the basic json transfer
         formatted = []
         for tool_type, tools in schemas.items():
-            formatted.append(f"\n{tool_type.upper()} Tools:")
+            formatted.append(f"\n# --- {tool_type.upper()} TOOLS ---")
+
             for tool in tools:
-                formatted.append(f"  - {tool['name']}: {tool['description']}")
+                name = tool["name"]
+                desc = tool["description"]
+                params = tool.get("parameters", {})
+                props = params.get("properties", {})
+                required = params.get("required", [])
+
+                args_list = []
+                for prop_name, prop_info in props.items():
+                    prop_type = prop_info.get("type", "any")
+                    if prop_name not in required:
+                        args_list.append(
+                            f"{prop_name}: {prop_type} = None"
+                        )  # handle llm to know is it required or not
+                    else:
+                        args_list.append(f"{prop_name}: {prop_type}")
+
+                args_str = ", ".join(args_list)
+                signature = f'async def {name}({args_str}):\n    """{desc}"""'
+
+                formatted.append(signature)
+
         return "\n".join(formatted)
 
     def _extract_code_block(self, response: str) -> str:
