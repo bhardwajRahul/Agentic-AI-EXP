@@ -94,7 +94,8 @@ def route_start(state: State) -> str:
 
     if (
         state.get("last_summary_timestamp") is not None
-        and (datetime.now().timestamp() - state.get("last_summary_timestamp")) > 21600
+        and (datetime.now().timestamp() - state.get("last_summary_timestamp"))
+        > 21600 * 4
     ) and count_tokens(messages[:]) > 4000:
         state["summary"] = ""
         state["last_summary_timestamp"] = datetime.now().timestamp()
