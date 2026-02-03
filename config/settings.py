@@ -9,6 +9,7 @@ DATA_DIR = Path(__file__).parent.parent / "data"
 CHECKPOINT_DB = DATA_DIR / "checkpoints.db"
 MEMORY_DB = DATA_DIR / "memory.db"
 VECTOR_DB = DATA_DIR / "embeddings"
+KNOWLEDGE_GRAPH_DB = DATA_DIR / "knowledge_graph_db" / "knowledge_graph.db"
 
 BASE_DIR = Path(__file__).parent.parent
 COMMUNICATION_SERVER = BASE_DIR / "mcp" / "core" / "communication_server.py"
