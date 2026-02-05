@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 
 root = Path(__file__).parent.parent
 sys.path.append(str(root))
-
+from config.prompts import KNOWLEDGE_GRAPH_GENERATION_PROMPT
 from config.settings import KNOWLEDGE_GRAPH_DB
 from utils.helper import setup_logger
 
@@ -58,8 +58,7 @@ class KnowledgeGraph:
                 self.conn.execute("""
                     CREATE REL TABLE RELATED_TO(
                         FROM Entity TO Entity, 
-                        rel_type STRING, 
-                        confidence DOUBLE
+                        rel_type STRING
                     )
                 """)
                 logger.info("RELATED_TO table created successfully.")
@@ -122,14 +121,12 @@ class KnowledgeGraph:
         except Exception as e:
             logger.info(f"Error adding node: {e}")
 
-    def add_relationship(
-        self, source: str, target: str, rel_type: str, confidence: float = 1.0
-    ):
+    def add_relationship(self, source: str, target: str, rel_type: str):
         try:
             query = f"""
             MATCH (a:Entity), (b:Entity)
             WHERE a.id = '{source}' AND b.id = '{target}'
-            CREATE (a)-[:RELATED_TO {{ rel_type: '{rel_type}', confidence: {confidence} }}]->(b)
+            CREATE (a)-[:RELATED_TO {{ rel_type: '{rel_type}' }}]->(b)
             """
             self.execute_query(query)
         except Exception as e:
@@ -152,14 +149,12 @@ class KnowledgeGraph:
             logger.info(f"Error modifying node attributes: {e}")
             return
 
-    def modify_relationship(
-        self, source: str, target: str, rel_type: str, confidence: float = 1.0
-    ):
+    def modify_relationship(self, source: str, target: str, rel_type: str):
         try:
             query = f"""
             MATCH (a:Entity)-[r:RELATED_TO]->(b:Entity)
             WHERE a.id = '{source}' AND b.id = '{target}'
-            SET r.rel_type = '{rel_type}', r.confidence = {confidence}
+            SET r.rel_type = '{rel_type}'
             """
             self.execute_query(query)
             logger.info(
@@ -200,41 +195,42 @@ class KnowledgeGraph:
     def find_similar_nodes(self, keywords: str, top_k: int = 5):
         try:
             query_embedding = self._compute_embedding(keywords)
-            query = f"""
-            MATCH (n:Entity) 
-            WHERE n.embedding IS NOT NULL
-            RETURN n.id, n.type, n.full_description, 
-                   array_cosine_similarity(n.embedding, CAST({query_embedding}, 'FLOAT[384]')) AS score
-            ORDER BY score DESC
-            LIMIT {top_k}
+
+            query = """
+                MATCH (n:Entity)
+                WHERE n.embedding IS NOT NULL
+                WITH n, array_cosine_similarity(n.embedding, CAST($query_embedding, 'FLOAT[384]')) AS score
+                WHERE score > 0.5
+                RETURN 
+                    n.id AS id, 
+                    n.type AS type, 
+                    n.full_description AS description,  
+                    score AS base_score
+                ORDER BY base_score DESC
+                LIMIT $top_k
             """
 
-            result = self.execute_query(query)
+            result = self.conn.execute(
+                query,
+                parameters={
+                    "query_embedding": query_embedding,
+                    "top_k": top_k,
+                },
+            )
 
-            if not result:
-                return []
+            df = result.get_as_df()
 
-            nodes_with_scores = []
-            while result.has_next():
-                row = result.get_next()
-                nodes_with_scores.append(
-                    {
-                        "id": row[0],
-                        "type": row[1],
-                        "full_description": row[2],
-                        "score": row[3],
-                    }
-                )
+            if not df.empty:
+                df = df.sort_values(by="base_score", ascending=False)
+                df = df.drop_duplicates(subset=["id"], keep="first")
 
-            return nodes_with_scores
+            return df
 
         except Exception as e:
             logger.info(f"Error finding similar nodes: {e}")
             return []
 
-    def find_similar_with_expansion(
-        self, keywords: str, top_k: int = 5, expansion_factor: float = 0.5
-    ):
+    def find_similar_with_expansion(self, keywords: str, top_k: int = 5):
         """
         Find similar nodes + their neighbors using standard Cypher matches.
         Independent of internal index names.
@@ -242,60 +238,55 @@ class KnowledgeGraph:
         query_embedding = self._compute_embedding(keywords)
 
         query = """
-            /* 1. Direct Matches (Hop 0) */
-            MATCH (n:Entity)
-            WHERE n.embedding IS NOT NULL
-            WITH n, array_cosine_similarity(n.embedding, CAST($query_embedding, 'FLOAT[384]')) AS score
-            ORDER BY score DESC
-            LIMIT $top_k
-            RETURN 
-                n.id AS id,
-                n.type AS type,
-                n.full_description AS description,
-                score AS base_score,
-                0 AS hops,
-                score AS relevance_score
-            
-            UNION
-            
-            /* 2. Direct Neighbors (Hop 1) */
-            MATCH (n:Entity)
-            WHERE n.embedding IS NOT NULL
-            WITH n, array_cosine_similarity(n.embedding, CAST($query_embedding, 'FLOAT[384]')) AS score
-            ORDER BY score DESC
-            LIMIT $top_k
-            MATCH (n)-[r]-(neighbor)
-            RETURN 
-                neighbor.id AS id,
-                neighbor.type AS type,
-                neighbor.full_description AS description,
-                score AS base_score,
-                1 AS hops,
-                CAST(score * $expansion_factor, 'FLOAT') AS relevance_score
-            """
+        /* 1. Get Hop 0 (Seeds) */
+        MATCH (n:Entity)
+        WHERE n.embedding IS NOT NULL
+        WITH n, array_cosine_similarity(n.embedding, CAST($query_embedding, 'FLOAT[384]')) AS seed_score
+        WHERE seed_score > 0.65
+        RETURN 
+            n.id AS id, 
+            n.type AS type, 
+            n.full_description AS description, 
+            0 AS hops, 
+            seed_score AS base_score
+        ORDER BY base_score DESC
+        LIMIT $top_k
+
+        UNION ALL
+
+        /* 2. Get Hop 1 (High-Confidence Neighbors) */
+        MATCH (n:Entity)-[r]-(neighbor)
+        WHERE n.embedding IS NOT NULL AND neighbor.embedding IS NOT NULL
+        WITH n, r, neighbor, array_cosine_similarity(n.embedding, CAST($query_embedding, 'FLOAT[384]')) AS score, array_cosine_similarity(neighbor.embedding, CAST($query_embedding, 'FLOAT[384]')) AS score2
+        WITH neighbor, CAST((0.9*score + 0.1*score2),'FLOAT') AS weighted_score
+        WHERE weighted_score > 0.5
+        RETURN 
+            neighbor.id AS id, 
+            neighbor.type AS type, 
+            neighbor.full_description AS description, 
+            1 AS hops, 
+            weighted_score AS base_score
+        """
 
         result = self.conn.execute(
             query,
             parameters={
                 "query_embedding": query_embedding,
                 "top_k": top_k,
-                "expansion_factor": expansion_factor,
             },
         )
 
         df = result.get_as_df()
 
         if not df.empty:
-            df = df.sort_values(by="relevance_score", ascending=False)
+            df = df.sort_values(by="base_score", ascending=False)
             df = df.drop_duplicates(subset=["id"], keep="first")
 
         return df
 
     def preprocess_graph(self):
         try:
-            query = (
-                "MATCH (n:Entity) WHERE n.embedding IS NULL RETURN n.id, n.description"
-            )
+            query = "MATCH (n:Entity) WHERE n.embedding IS NULL RETURN n.id, n.full_description"
             result = self.execute_query(query)
 
             while result.has_next():
@@ -309,26 +300,30 @@ class KnowledgeGraph:
         except Exception as e:
             logger.info(f"Error during graph preprocessing: {e}")
 
-    def generate_prompt(self, question: str, context: list):
-        context_str = "\n".join(
-            [
-                f"Node: {c['node']}, Subgraph: {json.dumps(c['subgraph'], indent=2)}"
-                for c in context
-            ]
-        )
+    def generate_entity_relation(self, knowledge_graph_df: str, chat_history: str):
+        knowledge_graph_str = knowledge_graph_df.get_as_str()
+
         prompt = f"""
-        You are an AI assistant. Answer the following question based on the provided graph data.
+            You are an agent why is responsible  to generate the entity and relationships 
+            to create a knowledge graph from the chat hsitory of the user you have to 
+            identify the key infomation that
+            """
+
+    def generate_(self, question: str, context: list):
+        context_str = "\n".join([f"Node: {c['node']}" for c in context])
+        prompt = f"""
+        {KNOWLEDGE_GRAPH_GENERATION_PROMPT}        
 
         Question: {question}
 
-        Graph Data:
+        Graph Data:     # need to check how many tokens are there
         {context_str}
 
         Answer:
         """
         return prompt
 
-    def visualize(self, output_path: str = "docs/knowledge_graph.png"):
+    def visualize(self, output_path: str = "docs/images/knowledge_graph.png"):
         try:
             nodes_res = self.conn.execute("MATCH (n:Entity) RETURN n.id, n.type")
             rels_res = self.conn.execute(

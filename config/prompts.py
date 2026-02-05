@@ -276,3 +276,6 @@ HISTORY_SUMMARIZE_PROMPT = """You are an expert at summarizing conversations bet
 Given the following conversation history, produce a concise summary that captures the key points, decisions, and actions taken. Focus on clarity and brevity."""
 
 KNOWLEDGE_GRAPH_PROMPT = """You are an AI assistant that answers questions based on a knowledge graph. Use the provided graph data to generate accurate and relevant responses."""
+
+
+KNOWLEDGE_GRAPH_GENERATION_PROMPT = """You are an AI assistant. Answer the following question based on the provided graph data."""
