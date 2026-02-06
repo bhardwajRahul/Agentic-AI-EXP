@@ -6,6 +6,9 @@ from sentence_transformers import SentenceTransformer
 import sys
 import pandas
 import networkx as nx
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from pydantic import BaseModel, Field
 from typing import List, Literal
@@ -140,12 +143,20 @@ class KnowledgeGraph:
             )
             embedding = self._compute_embedding(text)
 
+            delete_query = f"MATCH (n:Entity {{id: '{node_id}'}}) DETACH DELETE n"
+            self.execute_query(delete_query)
+
+            safe_desc = description.replace("'", "\\'")
+            safe_keywords = search_keywords.replace("'", "\\'")
+
             query = f"""
-            MERGE (n:Entity {{id: '{node_id}'}})
-            SET n.type = '{node_type}', 
-                n.search_keywords = '{search_keywords}',
-                n.description = '{description}', 
-                n.embedding = {embedding}
+            CREATE (n:Entity {{
+                id: '{node_id}',
+                type: '{node_type}', 
+                search_keywords: '{safe_keywords}',
+                description: '{safe_desc}', 
+                embedding: {embedding}
+            }})
             """
             self.execute_query(query)
             logger.info(f"✅ Node '{node_id}' re-created with aligned embedding.")
@@ -164,23 +175,54 @@ class KnowledgeGraph:
             logger.info(f"Error adding relationship: {e}")
             return
 
-    def modify_entity(self, node_id: str, updates: dict):
-        try:
-            set_clauses = ", ".join(
-                [f"n.{key} = '{value}'" for key, value in updates.items()]
-            )
+    # sometimes overriding is better than addition failure so need to work on that
+    # def modify_entity(self, node_id: str, updates: dict):
+    #     try:
+    #         if not updates:
+    #             return
+    #         query = f"MATCH (n:Entity) WHERE n.id = '{node_id}' RETURN n"
+    #         result = self.execute_query(query)
+    #         if not result or not result.has_next():
+    #             logger.info(f"Node '{node_id}' not found for update.")
+    #             return
+    #         type = ""
+    #         search_keywords = ""
+    #         if "type" not in updates:
+    #             query = (
+    #                 f"MATCH (n:Entity) WHERE n.id = '{node_id}' RETURN n.type AS type"
+    #             )
+    #             type = self.execute_query(query)
+    #         if "search_keywords" not in updates:
+    #             query = f"""
+    #             MATCH (n:Entity) WHERE n.id = '{node_id}' RETURN n.search_keywords AS search_keywords
+    #             """
+    #             search_keywords = self.execute_query(query)
 
-            query = f"""
-            MATCH (n:Entity) 
-            WHERE n.id = '{node_id}' 
-            SET {set_clauses}
-            """
+    #         text = f"Entity: {node_id} | Type: {updates.get('type', type)} | Keywords: {updates.get('search_keywords', search_keywords)}"
+    #         new_embedding = self.model.encode(text)
+    #         updates["embedding"] = new_embedding
 
-            # Execute the query
-            self.execute_query(query)
-            logger.info(f"Node '{node_id}' updated successfully.")
-        except Exception as e:
-            logger.error(f"Error modifying node: {e}")
+    #         set_parts = []
+    #         for key, value in updates.items():
+    #             if isinstance(value, str):
+    #                 safe_val = value.replace("'", "\\'")
+    #                 set_parts.append(f"n.{key} = '{safe_val}'")
+    #             else:
+    #                 set_parts.append(f"n.{key} = {value}")
+
+    #         set_clauses = ", ".join(set_parts)
+
+    #         query = f"""
+    #         MATCH (n:Entity)
+    #         WHERE n.id = '{node_id}'
+    #         SET {set_clauses}
+    #         """
+
+    #         self.execute_query(query)
+    #         logger.info(f"✅ Node '{node_id}' updated successfully in KuzuDB.")
+
+    #     except Exception as e:
+    #         logger.error(f"❌ Error modifying node '{node_id}': {e}")
 
     def modify_relationship(self, source: str, target: str, relation_type: str):
         try:
@@ -432,13 +474,15 @@ class KnowledgeGraph:
         except Exception as e:
             print(f"Error during visualization: {e}")
 
-    def generate_entity_relation(self, text: str) -> json:
+    def generate_entity_relation(
+        self, text: str, prompt=KNOWLEDGE_GRAPH_EXTRACTION_PROMPT
+    ) -> json:
         """
         Use LLM to extract knowledge graph from text.
         """
         from core.llm import build_llm
 
-        prompt = f"{KNOWLEDGE_GRAPH_EXTRACTION_PROMPT}\nChat History:\n{text}\n"
+        prompt = f"{prompt}\nChat History:\n{text}\n"
 
         llm_model = build_llm()
         response = llm_model.invoke(prompt)
@@ -454,14 +498,17 @@ class KnowledgeGraph:
             return None
 
     def validate_entity_relation(
-        self, existing_knowledge: pandas.DataFrame, new_knowledge: json
+        self,
+        existing_knowledge: pandas.DataFrame,
+        new_knowledge: json,
+        prompt=KNOWLEDGE_GRAPH_VALIDATION_PROMPT,
     ) -> bool:
         """
         Use LLM to validate the extracted knowledge graph JSON against the conversation.
         """
         from core.llm import build_llm
 
-        prompt = f"{KNOWLEDGE_GRAPH_VALIDATION_PROMPT}\nExisting Knowledge:\n{existing_knowledge}\nNew Knowledge:\n{new_knowledge}\n"
+        prompt = f"{prompt}\nExisting Knowledge:\n{existing_knowledge}\nNew Knowledge:\n{new_knowledge}\n"
 
         llm_model = build_llm()
         response = llm_model.invoke(prompt)
