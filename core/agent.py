@@ -318,13 +318,11 @@ async def updation_knowledge_graph(
                     description=entity.get("description", ""),
                 )
             elif action == "UPDATE":
-                kg.modify_entity(
+                kg.add_entity(
                     node_id=entity["id"],
-                    updates={
-                        "type": entity.get("type"),
-                        "description": entity.get("description"),
-                        "search_keywords": ", ".join(entity.get("keywords", [])),
-                    },
+                    node_type=entity.get("type", "unknown"),
+                    search_keywords=", ".join(entity.get("keywords", [])),
+                    description=entity.get("description", ""),
                 )
 
         for rel in resolution.get("relationships", []):

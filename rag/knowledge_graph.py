@@ -165,21 +165,23 @@ class KnowledgeGraph:
             logger.info(f"Error adding relationship: {e}")
             return
 
-    def modify_node_attributes(self, node_id: str, attributes: dict):
+    def modify_entity(self, node_id: str, updates: dict):
         try:
             set_clauses = ", ".join(
-                [f"n.{key} = '{value}'" for key, value in attributes.items()]
+                [f"n.{key} = '{value}'" for key, value in updates.items()]
             )
+
             query = f"""
             MATCH (n:Entity) 
             WHERE n.id = '{node_id}' 
             SET {set_clauses}
             """
+
+            # Execute the query
             self.execute_query(query)
-            logger.info(f"Node '{node_id}' attributes updated successfully.")
+            logger.info(f"Node '{node_id}' updated successfully.")
         except Exception as e:
-            logger.info(f"Error modifying node attributes: {e}")
-            return
+            logger.error(f"Error modifying node: {e}")
 
     def modify_relationship(self, source: str, target: str, relation_type: str):
         try:
@@ -188,6 +190,7 @@ class KnowledgeGraph:
             WHERE a.id = '{source}' AND b.id = '{target}'
             SET r.relation_type = '{relation_type}'
             """
+
             self.execute_query(query)
             logger.info(
                 f"Relationship from '{source}' to '{target}' updated successfully."
@@ -196,7 +199,7 @@ class KnowledgeGraph:
             logger.info(f"Error modifying relationship: {e}")
             return
 
-    def delete_node(self, node_id: str):
+    def delete_entity(self, node_id: str):
         try:
             query = f"""
             MATCH (n:Entity) 
@@ -204,9 +207,9 @@ class KnowledgeGraph:
             DETACH DELETE n
             """
             self.execute_query(query)
-            logger.info(f"Node '{node_id}' deleted successfully.")
+            logger.info(f"Entity '{node_id}' deleted successfully.")
         except Exception as e:
-            logger.info(f"Error deleting node: {e}")
+            logger.info(f"Error deleting entity: {e}")
             return
 
     def delete_relationship(self, source: str, target: str):
