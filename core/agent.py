@@ -33,6 +33,8 @@ logger = setup_logger(__name__)
 
 def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
     async def agent_node(state: State):
+
+        current_agent_name = agent_name
         request_counter["count"] += 1
         request_num = request_counter["count"]
 
@@ -82,7 +84,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
                 return {
                     "messages": [
                         AIMessage(
-                            content=f"[{current_time}] [{agent_name}] [ERROR] Rate limit reached. Please retry later.",
+                            content=f"[{current_time}] [{current_agent_name}] [ERROR] Rate limit reached. Please retry later.",
                         )
                     ]
                 }
@@ -93,7 +95,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             return {
                 "messages": [
                     AIMessage(
-                        content=f"[{current_time}] [{agent_name}] [ERROR] Network unavailable. Check connection.",
+                        content=f"[{current_time}] [{current_agent_name}] [ERROR] Network unavailable. Check connection.",
                     )
                 ]
             }
@@ -104,7 +106,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         raw_content = msg.content if msg.content else ""
 
         if raw_content:
-            final_content = f"[{current_time}] [{agent_name}] {raw_content}"
+            final_content = f"[{current_time}] [{current_agent_name}] {raw_content}"
         else:
             final_content = raw_content
 
@@ -148,17 +150,17 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         if hasattr(agent_message, "content") and isinstance(agent_message.content, str):
             if "CLARIFICATION NEEDED:" in agent_message.content.upper():
                 logger.info("❓ Clarification needed - routing to human")
-                agent_name = "Clarification Agent"
+                current_agent_name = "Clarification Agent"
 
             if "TALK TO USER:" in agent_message.content.upper():
                 logger.info("💬 Agent wants to talk to user - routing to human")
-                agent_name = "Clarification Agent"
+                current_agent_name = "Clarification Agent"
 
         # Log agent response for audit trail
         try:
             await log_event(
                 thread_id=DEFAULT_THREAD_ID,
-                actor=agent_name,
+                actor=current_agent_name,
                 message=final_content if final_content else "Tool calls made",
                 metadata={
                     "tool_calls": len(msg.tool_calls)
@@ -178,6 +180,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 def code_execution_factory(llm, tool_sets, agent_name: str):
     async def code_executor(state: State):
         current_time = get_current_time()  # system prompt should have this need to do
+        current_agent_name = agent_name
 
         last_messages = trim_messages(
             state["messages"],
@@ -211,7 +214,7 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
             logger.error(f"Code execution error: {e}")
             raw_content = f"Code execution failed: {str(e)}"
             agent_message = AIMessage(
-                content=f"[{current_time}] [{agent_name}] {raw_content}"
+                content=f"[{current_time}] [{current_agent_name}] {raw_content}"
             )
             return {"messages": [agent_message]}
 
@@ -221,7 +224,7 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
             f"Summary: {msg.get('summary', 'No summary')}\n"
         )
 
-        final_content = f"[{current_time}] [{agent_name}] {raw_content}"
+        final_content = f"[{current_time}] [{current_agent_name}] {raw_content}"
         agent_message = AIMessage(content=final_content)
 
         return {"messages": [agent_message]}
