@@ -158,7 +158,7 @@ def build_graph(tool_sets, checkpointer):
 
             # Log supervisor tool usage for audit trail
             try:
-                from utils.audit_manager import log_event
+                from utils.memory_manager import log_event
                 from config.settings import DEFAULT_THREAD_ID
 
                 await log_event(
@@ -196,7 +196,7 @@ def build_graph(tool_sets, checkpointer):
 
                 # Log supervisor routing decision for audit trail
                 try:
-                    from utils.audit_manager import log_event
+                    from utils.memory_manager import log_event
                     from config.settings import DEFAULT_THREAD_ID
 
                     await log_event(
@@ -244,7 +244,7 @@ def build_graph(tool_sets, checkpointer):
 
             # Log supervisor direct response for audit trail
             try:
-                from utils.audit_manager import log_event
+                from utils.memory_manager import log_event
                 from config.settings import DEFAULT_THREAD_ID
 
                 await log_event(

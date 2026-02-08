@@ -3,7 +3,40 @@ import sqlite3
 from config.settings import CHECKPOINT_DB
 import tiktoken
 from datetime import datetime
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 import pytz
+
+import re
+import html
+
+
+def clean_email_body(text: str) -> str:
+    # 1. Decode HTML entities (e.g., convert &#39; to ')
+    text = html.unescape(text)
+
+    # 2. Strip ZWNJ and other invisible junk
+    text = re.sub(r"[^\x20-\x7e]", r"", text)
+
+    # 3. Remove repeated special characters (like those divider lines -----)
+    text = re.sub(r"[-*=_]{3,}", " ", text)
+
+    # 4. Normalize whitespace
+    text = " ".join(text.split())
+
+    text = re.sub(r"\(mailto:[^)]*\)", "", text)
+
+    # Optional: Clean up the [Awesome], [Decent] text left behind
+    text = re.sub(r"\[Awesome\]|\[Decent\]|\[Not Great\]", "", text)
+
+    return text
+
+
+# This class does the short-term memory thing by adding ad summerizing the context in real-time
+class AsyncSqliteSaver(AsyncSqliteSaver):
+    async def aput(self, config, checkpoint, metadata, new_versions):
+        """Save checkpoint with cleaned messages"""
+
+        return await super().aput(config, checkpoint, metadata, new_versions)
 
 
 def count_tokens(messages):

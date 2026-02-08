@@ -17,11 +17,11 @@ root = Path(__file__).parent.parent
 sys.path.append(str(root))
 
 from config.settings import MEMORY_DB, DEFAULT_THREAD_ID
-from utils.audit_manager import log_event
+from utils.memory_manager import log_event
 
 
 from core.state import State
-from utils.context_manager import sanitize_history
+from utils.memory_manager import sanitize_history
 from utils.helper import request_counter, setup_logger, count_tokens, get_current_time
 from config.prompts import HISTORY_SUMMARIZE_PROMPT
 from core.llm import build_llm

@@ -14,7 +14,7 @@ from googleapiclient.errors import HttpError
 
 from app_mcp.auth.service_decoder import get_google_service
 from app_mcp.core.server_init import communication_server
-from utils.tools_helper import clean_email_body
+from utils.helper import clean_email_body
 
 from app_mcp.helper.pydantic_models import (
     EmailAddress,
