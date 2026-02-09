@@ -174,7 +174,7 @@ def build_graph(tool_sets, checkpointer):
                     actor="supervisor",
                     message=f"Using tools: {', '.join(tool_names)}",
                     metadata={
-                        "routing": "supervisor_tools",
+                        "routing_decision": "supervisor_tools",
                         "tool_count": len(response.tool_calls),
                         "request_num": request_num,
                     },
@@ -255,10 +255,10 @@ def build_graph(tool_sets, checkpointer):
 
                 await log_event(
                     thread_id=DEFAULT_THREAD_ID,
-                    actor="supervisor",
+                    actor="supervisor_task_response",
                     message=response.content,
                     metadata={
-                        "routing": "FINISH",
+                        "routing_decision": "FINISH",
                         "direct_response": True,
                         "request_num": request_num,
                     },

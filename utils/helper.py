@@ -71,7 +71,9 @@ async def get_agent_state(thread_id: str):
         print("=" * 40)
         print(f"📊 STATE FOR THREAD: {thread_id}")
         print("=" * 40)
-        print(f"🕒 Last Memory Timestamp: {values.get('last_memory_timestamp')}")
+        print(
+            f"🕒 Last Memory Timestamp: {datetime.fromtimestamp(values.get('last_memory_timestamp')) if values.get('last_memory_timestamp') else 'N/A'}"
+        )
         print(f"🧠 Summary: {values.get('summary')}")
         print(f"📨 Total Messages: {len(values.get('messages', []))}")
         print(f"🔜 Next Step: {snapshot.next}")

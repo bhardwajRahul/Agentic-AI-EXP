@@ -152,15 +152,12 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         )
 
         if hasattr(agent_message, "content") and isinstance(agent_message.content, str):
-            if "CLARIFICATION NEEDED:" in agent_message.content.upper():
+            if ("CLARIFICATION NEEDED:" in agent_message.content.upper()) or (
+                "TALK TO USER:" in agent_message.content.upper()
+            ):
                 logger.info("❓ Clarification needed - routing to human")
                 current_agent_name = "Clarification Agent"
 
-            if "TALK TO USER:" in agent_message.content.upper():
-                logger.info("💬 Agent wants to talk to user - routing to human")
-                current_agent_name = "Clarification Agent"
-
-        # Log agent response for audit trail
         try:
             await log_event(
                 thread_id=DEFAULT_THREAD_ID,
@@ -263,25 +260,28 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
 async def summerizer_node(state: State):
     logger.info("📝 Summarizer node activated to condense conversation history.")
 
-    state["number_of_summaries_today"] = state.get("number_of_summaries_today", 0) + 1
+    messages_to_summerize = state["messages"][:-15]
     # right now the prompt is not aware of we sending the summary and to summerize previous messages too
-    messages = f"Summary:\n{state.get('summary', '')}\n\n Chat Messages:\n{state['messages'][:-15]}"
+    prompt_content = f"Summary:\n{state.get('summary', '')}\n\n Chat Messages:\n{messages_to_summerize}"
     llm = build_llm()
-    messages = [SystemMessage(content=HISTORY_SUMMARIZE_PROMPT)] + messages
+    messages = [
+        SystemMessage(content=HISTORY_SUMMARIZE_PROMPT),
+        SystemMessage(content=prompt_content),
+    ]
     cleaned = await llm.ainvoke(messages)
 
     summarized_content = cleaned.content
 
-    delete_actions = [RemoveMessage(id=m.id) for m in messages]
+    delete_actions = [RemoveMessage(id=m.id) for m in messages_to_summerize]
 
     # Log summarization event for audit trail
     try:
         await log_event(
             thread_id=DEFAULT_THREAD_ID,
             actor="summerizer_node",
-            message=f"summerized content of previous text: {summarized_content}",
+            message=f"summerized content: {summarized_content}",
             metadata={
-                f"Archived {len(delete_actions)} messages.",
+                "archived_messages": len(delete_actions),
             },
         )
     except Exception as e:

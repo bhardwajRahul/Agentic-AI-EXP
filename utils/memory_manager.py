@@ -19,20 +19,6 @@ from utils.helper import count_tokens, setup_logger
 logger = setup_logger(__name__)
 
 
-def AgentState(state: State):
-
-    if hasattr(state, "__annotations__"):
-        print("\n🔍 State Structure & Values:")
-        for key, dtype in state.__annotations__.items():
-            current_value = getattr(state, key, "Not Set")
-
-            print(
-                f"   - {key}: {dtype} = {datetime.fromtimestamp(current_value) if isinstance(current_value, float) else current_value}"
-            )
-
-    return state
-
-
 async def log_event(thread_id: str, actor: str, message: str, metadata: dict = None):
     """Saves a human-readable log entry to a separate table."""
     async with aiosqlite.connect(MEMORY_DB) as db:
@@ -164,6 +150,4 @@ def sanitize_history(messages):
 
 if __name__ == "__main__":
     # Ensure the directory for the output file exists
-    # os.makedirs("utils", exist_ok=True)
-    # analyze_human_logs()
-    AgentState(State)
+    analyze_human_logs()
