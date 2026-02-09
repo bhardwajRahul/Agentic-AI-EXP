@@ -1,4 +1,3 @@
-from core.llm import build_llm
 from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
 import aiosqlite
 from datetime import datetime
@@ -8,13 +7,30 @@ import os
 import sys
 from pathlib import Path
 
+
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
+from core import state
+from core.state import State
 from config.settings import MEMORY_DB
 from utils.helper import count_tokens, setup_logger
 
 logger = setup_logger(__name__)
+
+
+def AgentState(state: State):
+
+    if hasattr(state, "__annotations__"):
+        print("\n🔍 State Structure & Values:")
+        for key, dtype in state.__annotations__.items():
+            current_value = getattr(state, key, "Not Set")
+
+            print(
+                f"   - {key}: {dtype} = {datetime.fromtimestamp(current_value) if isinstance(current_value, float) else current_value}"
+            )
+
+    return state
 
 
 async def log_event(thread_id: str, actor: str, message: str, metadata: dict = None):
@@ -148,5 +164,6 @@ def sanitize_history(messages):
 
 if __name__ == "__main__":
     # Ensure the directory for the output file exists
-    os.makedirs("utils", exist_ok=True)
-    analyze_human_logs()
+    # os.makedirs("utils", exist_ok=True)
+    # analyze_human_logs()
+    AgentState(State)

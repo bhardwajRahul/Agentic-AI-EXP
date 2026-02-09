@@ -1,6 +1,5 @@
 import logging
 import sqlite3
-from config.settings import CHECKPOINT_DB
 import tiktoken
 from datetime import datetime
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -8,6 +7,16 @@ import pytz
 
 import re
 import html
+import asyncio
+import aiosqlite
+import sys
+from pathlib import Path
+
+root = Path(__file__).parent.parent
+sys.path.insert(0, str(root))
+
+from config.settings import CHECKPOINT_DB
+from config.settings import DEFAULT_THREAD_ID
 
 
 def clean_email_body(text: str) -> str:
@@ -37,6 +46,36 @@ class AsyncSqliteSaver(AsyncSqliteSaver):
         """Save checkpoint with cleaned messages"""
 
         return await super().aput(config, checkpoint, metadata, new_versions)
+
+
+mock_tool_sets = {"communication": [], "planning": [], "content": [], "supervisor": []}
+
+
+async def get_agent_state(thread_id: str):
+    async with aiosqlite.connect(str(CHECKPOINT_DB)) as conn:
+        checkpointer = AsyncSqliteSaver(conn)
+
+        from core.graph import build_graph
+
+        graph = build_graph(mock_tool_sets, checkpointer)
+
+        config = {"configurable": {"thread_id": thread_id}}
+
+        snapshot = await graph.aget_state(config)
+
+        if not snapshot.values:
+            print("❌ No state found for this thread ID.")
+            return
+
+        values = snapshot.values
+        print("=" * 40)
+        print(f"📊 STATE FOR THREAD: {thread_id}")
+        print("=" * 40)
+        print(f"🕒 Last Memory Timestamp: {values.get('last_memory_timestamp')}")
+        print(f"🧠 Summary: {values.get('summary')}")
+        print(f"📨 Total Messages: {len(values.get('messages', []))}")
+        print(f"🔜 Next Step: {snapshot.next}")
+        print("=" * 40)
 
 
 def count_tokens(messages):
@@ -104,3 +143,7 @@ def delete_thread_from_db(thread_id: str):
 def get_current_time():
     now = datetime.now(pytz.timezone("Asia/Kolkata"))
     return now.strftime("%Y-%m-%d %H:%M:%S IST")
+
+
+if __name__ == "__main__":
+    asyncio.run(get_agent_state(DEFAULT_THREAD_ID))

@@ -11,7 +11,12 @@ from config.prompts import (
     SUPERVISOR_SYSTEM_PROMPT,
     CONTENT_SYSTEM_PROMPT,
 )
-from core.agent import agent_node_factory, summerizer_node, code_execution_factory
+from core.agent import (
+    agent_node_factory,
+    summerizer_node,
+    code_execution_factory,
+    memory_node_factory,
+)
 from core.llm import build_llm_with_tools, build_llm
 from core.state import State, route_after_supervisor, internal_agent_route, route_start
 from utils.helper import request_counter, setup_logger
@@ -51,6 +56,8 @@ def build_graph(tool_sets, checkpointer):
         agent_name="code_agent",
     )
 
+    memory_update_node = memory_node_factory()
+
     async def supervisor_node(
         state: State,
         llm_with_tools=supervisor_llm,
@@ -62,6 +69,7 @@ def build_graph(tool_sets, checkpointer):
 
         current_time = get_current_time()
 
+        logger.info("\n")
         logger.info("=" * 80)
         logger.info(f"👮 SUPERVISOR REQUEST #{request_num}")
         logger.info("=" * 80)
@@ -224,9 +232,7 @@ def build_graph(tool_sets, checkpointer):
                     "messages": [agent_message],
                 }
 
-        # CASE C: Direct Reply (No Tools, No JSON)
-        # The Supervisor decided to answer the user directly
-        logger.info("🗣️ Supervisor responding directly")
+        # CASE C: The Supervisor decided to answer the user directly
         if (
             hasattr(response, "content")
             and response.content
@@ -291,6 +297,8 @@ def build_graph(tool_sets, checkpointer):
         ToolNode(tools=supervisor_tools, handle_tool_errors=True),
     )
 
+    builder.add_node("memory_update_node", memory_update_node)
+
     builder.add_conditional_edges(
         source=START,
         path=route_start,
@@ -299,11 +307,13 @@ def build_graph(tool_sets, checkpointer):
             "planning_agent": "planning_agent",
             "content_agent": "content_agent",
             "summerizer_node": "summerizer_node",
+            "memory_update_node": "memory_update_node",
             "supervisor": "supervisor",
         },
     )
 
     builder.add_edge("summerizer_node", "supervisor")
+    builder.add_edge("memory_update_node", "supervisor")
 
     builder.add_conditional_edges(
         "supervisor",

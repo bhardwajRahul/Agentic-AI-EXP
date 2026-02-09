@@ -12,6 +12,7 @@ import aiosqlite
 from datetime import datetime
 import sys
 from pathlib import Path
+import time
 
 root = Path(__file__).parent.parent
 sys.path.append(str(root))
@@ -40,6 +41,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 
         current_time = get_current_time()
 
+        logger.info("\n")
         logger.info("=" * 80)
         logger.info(f"🔄 LLM REQUEST #{request_num}")
         logger.info("=" * 80)
@@ -179,6 +181,30 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
     return agent_node
 
 
+def memory_node_factory():
+    async def memory_node(state: State):
+        import time
+        from core.agent import updation_knowledge_graph
+        from config.settings import DEFAULT_THREAD_ID, MEMORY_DB
+
+        now_float = time.time()
+
+        updates = {
+            "summary": "",
+            "number_of_summaries_today": 0,
+            "last_summary_timestamp": now_float,
+        }
+
+        await updation_knowledge_graph(
+            state=state, thread_id=DEFAULT_THREAD_ID, db_path=MEMORY_DB
+        )
+
+        updates["last_memory_timestamp"] = now_float
+        return updates
+
+    return memory_node
+
+
 def code_execution_factory(llm, tool_sets, agent_name: str):
     async def code_executor(state: State):
         current_time = get_current_time()  # system prompt should have this need to do
@@ -300,9 +326,14 @@ async def updation_knowledge_graph(
             f"Extracted candidates for KG update: {json.dumps(candidates_json, indent=2)}"
         )
 
-        entities = candidates_json.get("candidates", {}).get("entities", [])
-        if not entities:
+        if not candidates_json.get("candidates", {}).get(
+            "entities"
+        ) and not candidates_json.get("candidates", {}).get("relationships"):
+            logger.info(
+                "🔍 No valid entities or relationships found. Exiting update process."
+            )
             return
+        entities = candidates_json.get("candidates", {}).get("entities", [])
 
         types_df = kg.search_similar_node(entities)
 
@@ -346,6 +377,7 @@ async def updation_knowledge_graph(
                     relation_type=rel.get("relation_type", "unknown"),
                 )
         logger.info("✅ Knowledge graph update process completed successfully.")
+        kg.visualize()
 
     except Exception as e:
         logger.error(f"Knowledge graph update failed: {e}")

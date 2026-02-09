@@ -74,6 +74,7 @@ async def main():
                 if not user_query:
                     continue
 
+                logger.info("\n")
                 logger.info(f"👤 User Query: {user_query}")
 
                 try:
