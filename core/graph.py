@@ -4,7 +4,6 @@ from langgraph.prebuilt import ToolNode
 import re
 import json
 import httpx
-import asyncio
 from config.prompts import (
     COMMUNICATION_SYSTEM_PROMPT,
     PLANNING_SYSTEM_PROMPT,
@@ -21,7 +20,6 @@ from core.llm import build_llm_with_tools, build_llm
 from core.state import State, route_after_supervisor, internal_agent_route, route_start
 from utils.helper import request_counter, setup_logger
 from utils.helper import count_tokens, get_current_time
-from config.settings import DEFAULT_OPEN_CODE_MODEL
 
 logger = setup_logger(__name__)
 
@@ -110,7 +108,9 @@ def build_graph(tool_sets, checkpointer):
                     "next": "FINISH",
                     "messages": [
                         AIMessage(
-                            content=f"[{current_time}] [supervisor] [ERROR] Rate limit reached.",
+                            content="[ERROR] Rate limit reached.",
+                            name="supervisor",
+                            additional_kwargs={"timestamp": current_time},
                         )
                     ],
                 }
@@ -119,7 +119,9 @@ def build_graph(tool_sets, checkpointer):
                 "next": "FINISH",
                 "messages": [
                     AIMessage(
-                        content=f"[{current_time}] [supervisor] [ERROR] {e}",
+                        content=f"[ERROR] {e}",
+                        name="supervisor",
+                        additional_kwargs={"timestamp": current_time},
                     )
                 ],
             }
@@ -129,7 +131,9 @@ def build_graph(tool_sets, checkpointer):
                 "next": "FINISH",
                 "messages": [
                     AIMessage(
-                        content=f"[{current_time}] [supervisor] [ERROR] Network unavailable.",
+                        content="[ERROR] Network unavailable.",
+                        name="supervisor",
+                        additional_kwargs={"timestamp": current_time},
                     )
                 ],
             }
@@ -139,7 +143,9 @@ def build_graph(tool_sets, checkpointer):
                 "next": "supervisor",
                 "messages": [
                     AIMessage(
-                        content=f"[{current_time}] [supervisor] [ERROR] {e}",
+                        content=f"[ERROR] {e}",
+                        name="supervisor",
+                        additional_kwargs={"timestamp": current_time},
                     ),
                 ],
             }
@@ -160,8 +166,10 @@ def build_graph(tool_sets, checkpointer):
                 tool_names.append(tool_call.get("name", "N/A"))
 
             agent_message = AIMessage(
-                content=f"[{current_time}] [supervisor] {response.content}",
+                content=response.content,
+                name="supervisor",
                 tool_calls=getattr(response, "tool_calls", []),
+                additional_kwargs={"timestamp": current_time},
             )
 
             # Log supervisor tool usage for audit trail
@@ -169,13 +177,21 @@ def build_graph(tool_sets, checkpointer):
                 from utils.memory_manager import log_event
                 from config.settings import DEFAULT_THREAD_ID
 
+                # Filter tool calls to exclude 'id'
+                tool_calls_log = []
+                if hasattr(response, "tool_calls") and response.tool_calls:
+                    for tool_call in response.tool_calls:
+                        tc_copy = tool_call.copy()
+                        tc_copy.pop("id", None)
+                        tool_calls_log.append(tc_copy)
+
                 await log_event(
                     thread_id=DEFAULT_THREAD_ID,
                     actor="supervisor",
                     message=f"Using tools: {', '.join(tool_names)}",
                     metadata={
                         "routing_decision": "supervisor_tools",
-                        "tool_count": len(response.tool_calls),
+                        "tool_calls": tool_calls_log,
                         "request_num": request_num,
                     },
                 )
@@ -224,7 +240,9 @@ def build_graph(tool_sets, checkpointer):
                 response = f"Error in json parsing tried to route to other agent: {e}"
 
                 agent_message = AIMessage(
-                    content=f"[{current_time}] [supervisor] {response}",
+                    content=response,
+                    name="supervisor",
+                    additional_kwargs={"timestamp": current_time},
                 )
 
                 return {
@@ -245,7 +263,9 @@ def build_graph(tool_sets, checkpointer):
             )
             logger.info(f"📄 Response content: {content_preview}")
             agent_message = AIMessage(
-                content=f"[{current_time}] [supervisor] {response.content}",
+                content=response.content,
+                name="supervisor",
+                additional_kwargs={"timestamp": current_time},
             )
 
             # Log supervisor direct response for audit trail

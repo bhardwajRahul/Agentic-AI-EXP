@@ -86,7 +86,9 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
                 return {
                     "messages": [
                         AIMessage(
-                            content=f"[{current_time}] [{current_agent_name}] [ERROR] Rate limit reached. Please retry later.",
+                            content="[ERROR] Rate limit reached. Please retry later.",
+                            name=current_agent_name,
+                            additional_kwargs={"timestamp": current_time},
                         )
                     ]
                 }
@@ -97,7 +99,9 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             return {
                 "messages": [
                     AIMessage(
-                        content=f"[{current_time}] [{current_agent_name}] [ERROR] Network unavailable. Check connection.",
+                        content="[ERROR] Network unavailable. Check connection.",
+                        name=current_agent_name,
+                        additional_kwargs={"timestamp": current_time},
                     )
                 ]
             }
@@ -106,11 +110,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             raise
 
         raw_content = msg.content if msg.content else ""
-
-        if raw_content:
-            final_content = f"[{current_time}] [{current_agent_name}] {raw_content}"
-        else:
-            final_content = raw_content
+        final_content = raw_content
 
         if hasattr(msg, "tool_calls") and msg.tool_calls:
             logger.info(f"🔧 Tool calls made: {len(msg.tool_calls)}")
@@ -132,22 +132,11 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
             )
             logger.info(f"📄 Response content: {content_preview}")
 
-        # if hasattr(msg, "usage_metadata") and msg.usage_metadata:
-        #     usage = msg.usage_metadata
-        #     logger.info("📈 Token usage:")
-        #     logger.info(f"   Input tokens: {usage.get('input_tokens', 'N/A')}")
-        #     logger.info(f"   Output tokens: {usage.get('output_tokens', 'N/A')}")
-        #     logger.info(f"   Total tokens: {usage.get('total_tokens', 'N/A')}")
-
         logger.info("=" * 80)
-
-        # if (
-        #     hasattr(msg, "tool_calls") and msg.tool_calls
-        # ):  # i need to control what is being sent by this so that only important can be passed
-        #     msg.content = ""
 
         agent_message = AIMessage(
             content=final_content,
+            name=current_agent_name,
             tool_calls=getattr(msg, "tool_calls", []),
         )
 
@@ -159,14 +148,20 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
                 current_agent_name = "Clarification Agent"
 
         try:
+            # Filter tool calls to exclude 'id' but keep everything else
+            tool_calls_log = []
+            if hasattr(msg, "tool_calls") and msg.tool_calls:
+                for tool_call in msg.tool_calls:
+                    tc_copy = tool_call.copy()
+                    tc_copy.pop("id", None)
+                    tool_calls_log.append(tc_copy)
+
             await log_event(
                 thread_id=DEFAULT_THREAD_ID,
                 actor=current_agent_name,
                 message=final_content if final_content else "Tool calls made",
                 metadata={
-                    "tool_calls": len(msg.tool_calls)
-                    if hasattr(msg, "tool_calls")
-                    else 0,
+                    "tool_calls": tool_calls_log,
                     "request_num": request_num,
                 },
             )
@@ -180,7 +175,6 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 
 def memory_node_factory():
     async def memory_node(state: State):
-        import time
         from core.agent import updation_knowledge_graph
         from config.settings import DEFAULT_THREAD_ID, MEMORY_DB
 
@@ -238,9 +232,7 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
         except Exception as e:
             logger.error(f"Code execution error: {e}")
             raw_content = f"Code execution failed: {str(e)}"
-            agent_message = AIMessage(
-                content=f"[{current_time}] [{current_agent_name}] {raw_content}"
-            )
+            agent_message = AIMessage(content=raw_content, name=current_agent_name)
             return {"messages": [agent_message]}
 
         # Format result
@@ -249,8 +241,12 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
             f"Summary: {msg.get('summary', 'No summary')}\n"
         )
 
-        final_content = f"[{current_time}] [{current_agent_name}] {raw_content}"
-        agent_message = AIMessage(content=final_content)
+        final_content = raw_content
+        agent_message = AIMessage(
+            content=final_content,
+            name=current_agent_name,
+            additional_kwargs={"timestamp": current_time},
+        )
 
         return {"messages": [agent_message]}
 

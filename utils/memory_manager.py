@@ -1,19 +1,22 @@
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage, SystemMessage
+from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
 import aiosqlite
 from datetime import datetime
 import sqlite3
-import os
 
 import sys
 from pathlib import Path
+
+import msgpack
+import pickle
+from msgpack import ExtType
+import json
+import re
 
 
 root_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(root_dir))
 
-from core import state
-from core.state import State
-from config.settings import MEMORY_DB
+from config.settings import MEMORY_DB, CHECKPOINT_DB
 from utils.helper import count_tokens, setup_logger
 
 logger = setup_logger(__name__)
@@ -148,6 +151,89 @@ def sanitize_history(messages):
     return clean_history
 
 
+OUTPUT_FILE = "utils/checkpoint_text_dump.txt"
+
+
+def ext_hook(code, data):
+    if code == 5:  # LangChain message wrapper
+        try:
+            return pickle.loads(data)
+        except Exception:
+            return {"__raw_message__": data}
+    return ExtType(code, data)
+
+
+def decode_checkpoint(blob):
+    return msgpack.unpackb(
+        blob,
+        raw=False,
+        ext_hook=ext_hook,
+        strict_map_key=False,
+    )
+
+
+def extract_text(msg):
+    # Already normalized (input)
+    if isinstance(msg, dict) and "role" in msg and "content" in msg:
+        return msg["role"].upper(), msg["content"]
+
+    # Proper LangChain message
+    if hasattr(msg, "content"):
+        role = msg.__class__.__name__.replace("Message", "").upper()
+        return role, msg.content
+
+    # Raw binary fallback
+    if isinstance(msg, dict) and "__raw_message__" in msg:
+        raw = msg["__raw_message__"]
+        text = raw.decode("utf-8", errors="ignore")
+        text = re.sub(r"[\x00-\x1f\x7f-\x9f]", " ", text)
+        return "UNKNOWN", text.strip()
+
+    return None, None
+
+
+def analyze_checkpoint_db():
+    conn = sqlite3.connect(str(CHECKPOINT_DB))
+    cursor = conn.cursor()
+
+    cursor.execute(
+        "SELECT thread_id, checkpoint, metadata FROM checkpoints ORDER BY rowid"
+    )
+    rows = cursor.fetchall()
+
+    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+        for thread_id, checkpoint, metadata in rows:
+            try:
+                decoded = decode_checkpoint(checkpoint)
+
+                messages = decoded.get("channel_values", {}).get("messages", [])
+
+                if not messages:
+                    continue
+
+                meta = json.loads(metadata.decode("utf-8"))
+                header = (
+                    f"THREAD {thread_id} | "
+                    f"source={meta.get('source')} | "
+                    f"step={meta.get('step')}\n"
+                )
+
+                f.write(header)
+
+                for msg in messages:
+                    role, text = extract_text(msg)
+                    if text:
+                        f.write(f"{role}: {text}\n")
+
+                f.write("-" * 60 + "\n\n")
+
+            except Exception as e:
+                f.write(f"THREAD {thread_id} | ERROR: {e}\n")
+                f.write("-" * 60 + "\n\n")
+
+    conn.close()
+    print(f"✅ Text written to: {OUTPUT_FILE}")
+
+
 if __name__ == "__main__":
-    # Ensure the directory for the output file exists
-    analyze_human_logs()
+    analyze_checkpoint_db()
