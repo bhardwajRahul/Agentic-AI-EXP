@@ -171,7 +171,7 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
                     thread_id=DEFAULT_THREAD_ID,
                     actor=current_agent_name,
                     message=f"{', '.join([format_tool_to_text(tc.get('name', ''), json.dumps(tc.get('args', {}))) for tc in msg.tool_calls])}",
-                    metadata={},
+                    metadata={"type": "tool_call"},
                 )
         except Exception as e:
             logger.error(f"Failed to log audit event: {e}")

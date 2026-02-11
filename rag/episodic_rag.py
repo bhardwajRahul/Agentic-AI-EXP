@@ -4,9 +4,14 @@ import aiosqlite
 import sys
 from pathlib import Path
 import asyncio
+from datetime import datetime
 
-MIN_TOKENS = 50
-MAX_TOKENS = 1000
+MIN_MESSAGE_TOKENS = 25
+MIN_CHUNK_TOKENS = 200
+MAX_CHUNK_TOKENS = (
+    1000  # this threshold need to optimize based on performance now done heeeee
+)
+MAX_TIME_GAP_SECONDS = 3600
 
 root_dir = Path(__file__).parent.parent
 sys.path.append(str(root_dir))
@@ -18,7 +23,7 @@ logger = setup_logger(__name__)
 
 
 class EpisodicRAG:
-    def __init__(self, db_path=MEMORY_DB, past_summery_date=None):
+    def __init__(self, past_summery_date=None, db_path=MEMORY_DB):
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.past_summery_date = past_summery_date
@@ -29,7 +34,7 @@ class EpisodicRAG:
     DECORATOR_PATTERN = re.compile(r"[-=_*|]{3,}")
     LOG_HEADER_PATTERN = re.compile(r"^\[.*?\] \[.*?\]\s*")
 
-    def clean_messages(self, text: str):
+    def clean_messages_for_chunk(self, text: str):
         if not text:
             return None
 
@@ -57,10 +62,11 @@ class EpisodicRAG:
             return []
 
         query = """
-            SELECT timestamp, actor, message 
+            SELECT timestamp, actor, message
             FROM human_logs 
             WHERE timestamp > ? 
             AND actor != 'supervisor_routing' 
+            AND actor != 'summerizer_node'
             ORDER BY timestamp ASC
         """
 
@@ -70,113 +76,142 @@ class EpisodicRAG:
                 logger.info(f"Processing {len(rows)} raw logs...")
 
         episodes = []
-        current_episode_lines = []
+        current_lines = []
         current_start_ts = None
+        current_ts_obj = None
+        actors = set()
 
         for timestamp, actor, message in rows:
-            if actor == "Human_node":
-                if current_episode_lines:
-                    episodes.append(
-                        {"timestamp": current_start_ts, "lines": current_episode_lines}
-                    )
+            try:
+                ts_obj = datetime.fromisoformat(timestamp)
+            except ValueError:
+                continue
 
+            if actor == "Human_node":
+                if current_lines:
+                    episodes.append(
+                        {
+                            "ts_obj": current_ts_obj,
+                            "timestamp": current_start_ts,
+                            "lines": current_lines,
+                            "actors": list(actors),
+                        }
+                    )
+                current_lines = [f"User: {message}"]
                 current_start_ts = timestamp
-                current_episode_lines = [f"User: {message}"]
+                current_ts_obj = ts_obj
+                actors = set()
 
             elif actor == "supervisor_task_response":
-                current_episode_lines.append(f"Assistant: {message}")
-
-                if current_episode_lines:
+                current_lines.append(f"Assistant: {message}")
+                actors.add("supervisor")
+                if current_lines:
                     episodes.append(
-                        {"timestamp": current_start_ts, "lines": current_episode_lines}
+                        {
+                            "ts_obj": current_ts_obj,
+                            "timestamp": current_start_ts,
+                            "lines": current_lines,
+                            "actors": list(actors),
+                        }
                     )
-                    current_episode_lines = []
+                    current_lines = []
                     current_start_ts = None
-
+                    actors = set()
             else:
-                if current_episode_lines:
-                    if "tool_call" in str(message) or "__Tool Action__" in str(message):
-                        current_episode_lines.append(f"{message}")
-                    else:
-                        current_episode_lines.append(f"{actor}: {message}")
+                if current_lines:
+                    current_lines.append(f"{actor}: {message}")
+                    actors.add(actor)
 
-        if current_episode_lines:
+        if current_lines:
             episodes.append(
-                {"timestamp": current_start_ts, "lines": current_episode_lines}
+                {
+                    "ts_obj": current_ts_obj,
+                    "timestamp": current_start_ts,
+                    "lines": current_lines,
+                    "actors": list(actors),
+                }
             )
 
         final_chunks = []
 
         for episode in episodes:
-            task_uuid = str(uuid.uuid4())
+            ep_text = "\n".join(episode["lines"])
+            ep_clean = self.clean_messages_for_chunk(ep_text)
 
-            full_text = "\n".join(episode["lines"])
-            cleaned_full_text = self.clean_messages(full_text)
+            current_actors = episode.get("actors")
+            if not current_actors:
+                current_actors = set("supervisor")
 
-            if not cleaned_full_text:
+            if not ep_clean:
                 continue
 
-            total_tokens = count_tokens(cleaned_full_text)
+            ep_tokens = count_tokens(ep_clean)
+            has_tool = any(
+                "__Tool Action__" in l or "Using tools" in l for l in episode["lines"]
+            )
 
-            if total_tokens < MIN_TOKENS:
+            if ep_tokens < MIN_MESSAGE_TOKENS and not has_tool:
                 continue
 
-            if total_tokens <= MAX_TOKENS:
-                final_chunks.append(
-                    {
-                        "id": str(uuid.uuid4()),
-                        "content": cleaned_full_text,
-                        "metadata": {
-                            "timestamp": episode["timestamp"],
-                            "task_id": task_uuid,
-                            "part": 1,
-                            "total_parts": 1,
-                        },
-                    }
-                )
+            elif (
+                ep_tokens < MIN_CHUNK_TOKENS
+            ):  # Why backward? Because a small follow-up usually relates to the previous big thought.
+                merged = False
+                if final_chunks:
+                    last_chunk = final_chunks[-1]
 
-            else:
-                current_chunk_lines = []
-                current_chunk_tokens = 0
-                part_counter = 1
+                try:
+                    last_ts = datetime.fromisoformat(
+                        last_chunk["metadata"]["timestamp"]
+                    )
+                    time_gap = (episode["ts_obj"] - last_ts).total_seconds()
+                except:
+                    time_gap = 999999
 
-                for line in episode["lines"]:
-                    cleaned_line = self.clean_messages(line)
-                    if not cleaned_line:
-                        continue
+                if time_gap < MAX_TIME_GAP_SECONDS:
+                    current_last_tokens = count_tokens(last_chunk["content"])
 
-                    line_tokens = count_tokens(cleaned_line)
+                    if current_last_tokens + ep_tokens <= MAX_CHUNK_TOKENS:
+                        last_chunk["content"] += "\n" + ep_clean
 
-                    if current_chunk_tokens + line_tokens > MAX_TOKENS:
-                        chunk_content = "\n".join(current_chunk_lines)
-                        final_chunks.append(
-                            {
-                                "id": str(uuid.uuid4()),
-                                "content": chunk_content,
-                                "metadata": {
-                                    "timestamp": episode["timestamp"],
-                                    "task_id": task_uuid,
-                                    "part": part_counter,
-                                },
-                            }
-                        )
+                        existing_actors = set(last_chunk["metadata"]["actors"])
+                        existing_actors.update(current_actors)
+                        last_chunk["metadata"]["actors"] = list(existing_actors)
 
-                        part_counter += 1
-                        current_chunk_lines = [cleaned_line]
-                        current_chunk_tokens = line_tokens
-                    else:
-                        current_chunk_lines.append(cleaned_line)
-                        current_chunk_tokens += line_tokens
+                        merged = True
 
-                if current_chunk_lines:
+                if not merged:
+                    task_uuid = str(uuid.uuid4())
                     final_chunks.append(
                         {
                             "id": str(uuid.uuid4()),
-                            "content": "\n".join(current_chunk_lines),
+                            "content": ep_clean,
                             "metadata": {
                                 "timestamp": episode["timestamp"],
                                 "task_id": task_uuid,
-                                "part": part_counter,
+                                "part": 1,
+                                "actors": current_actors,
+                            },
+                        }
+                    )
+
+            else:
+                if ep_tokens > MAX_CHUNK_TOKENS:
+                    chunks = self._split_text_to_chunks(
+                        episode["lines"], episode["timestamp"], current_actors
+                    )
+                    final_chunks.extend(chunks)
+                else:
+                    task_uuid = str(uuid.uuid4())
+                    final_chunks.append(
+                        {
+                            "id": str(uuid.uuid4()),
+                            "content": ep_clean,
+                            "metadata": {
+                                "timestamp": episode["timestamp"],
+                                "task_id": task_uuid,
+                                "part": 1,
+                                "actors": current_actors,
                             },
                         }
                     )
@@ -195,8 +230,74 @@ class EpisodicRAG:
         )
         return final_chunks
 
+    def _split_text_to_chunks(self, text_lines, timestamp, actors):
+        task_uuid = str(uuid.uuid4())
+        generated_chunks = []
 
-if __name__ == "__main__":
-    past_summery_date = "2024-01-01 00:00:00"
-    rag = EpisodicRAG(past_summery_date=past_summery_date)
-    asyncio.run(rag.custom_text_splitters())
+        current_lines = []
+        current_tokens = 0
+        part = 1
+
+        full_text = "\n".join(text_lines)
+
+        cleaned_total = self.clean_messages_for_chunk(full_text)
+        if not cleaned_total:
+            return []
+
+        if count_tokens(cleaned_total) <= MAX_CHUNK_TOKENS:
+            return [
+                {
+                    "id": str(uuid.uuid4()),
+                    "content": cleaned_total,
+                    "metadata": {
+                        "timestamp": timestamp,
+                        "task_id": task_uuid,
+                        "part": 1,
+                        "total_parts": 1,
+                        "actors": actors,
+                    },
+                }
+            ]
+
+        for line in text_lines:
+            clean_line = self.clean_messages_for_chunk(line)
+            if not clean_line:
+                continue
+
+            line_tokens = count_tokens(clean_line)
+
+            if current_tokens + line_tokens > MAX_CHUNK_TOKENS:
+                generated_chunks.append(
+                    {
+                        "id": str(uuid.uuid4()),
+                        "content": "\n".join(current_lines),
+                        "metadata": {
+                            "timestamp": timestamp,
+                            "task_id": task_uuid,
+                            "part": part,
+                            "actors": actors,
+                        },
+                    }
+                )
+                current_lines = [clean_line]
+                current_tokens = line_tokens
+                part += 1
+            else:
+                current_lines.append(clean_line)
+                current_tokens += line_tokens
+
+        if current_lines:
+            generated_chunks.append(
+                {
+                    "id": str(uuid.uuid4()),
+                    "content": "\n".join(current_lines),
+                    "metadata": {
+                        "timestamp": timestamp,
+                        "task_id": task_uuid,
+                        "part": part,
+                        "actors": actors,
+                    },
+                }
+            )
+
+        return generated_chunks
