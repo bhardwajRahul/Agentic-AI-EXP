@@ -14,6 +14,9 @@ import sys
 from pathlib import Path
 import time
 
+import rag
+from rag.episodic_rag import EpisodicRAG
+
 root = Path(__file__).parent.parent
 sys.path.append(str(root))
 
@@ -181,29 +184,6 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
     return agent_node
 
 
-def memory_node_factory():
-    async def memory_node(state: State):
-        from core.agent import updation_knowledge_graph
-        from config.settings import DEFAULT_THREAD_ID, MEMORY_DB
-
-        now_float = time.time()
-
-        updates = {
-            "summary": "",
-            "number_of_summaries_today": 0,
-            "last_summary_timestamp": now_float,
-        }
-
-        await updation_knowledge_graph(
-            state=state, thread_id=DEFAULT_THREAD_ID, db_path=MEMORY_DB
-        )
-
-        updates["last_memory_timestamp"] = now_float
-        return updates
-
-    return memory_node
-
-
 def code_execution_factory(llm, tool_sets, agent_name: str):
     async def code_executor(state: State):
         current_time = get_current_time()  # system prompt should have this need to do
@@ -303,6 +283,48 @@ async def summerizer_node(state: State):
         logger.error(f"Failed to log summarizer audit event: {e}")
 
     return {"summary": summarized_content, "messages": delete_actions}
+
+
+def memory_node_factory():
+    async def memory_node(state: State):
+        from core.agent import updation_knowledge_graph
+        from core.agent import updation_episodic_rag
+
+        from config.settings import DEFAULT_THREAD_ID, MEMORY_DB
+
+        now_float = time.time()
+
+        updates = {
+            "summary": "",
+            "number_of_summaries_today": 0,
+            "last_summary_timestamp": now_float,
+        }
+
+        await updation_knowledge_graph(
+            state=state, thread_id=DEFAULT_THREAD_ID, db_path=MEMORY_DB
+        )
+
+        await updation_episodic_rag(
+            past_summary_date=updates["last_summary_timestamp"], db_path=MEMORY_DB
+        )
+
+        updates["last_memory_timestamp"] = now_float
+        return updates
+
+    return memory_node
+
+
+async def updation_episodic_rag(past_summery_date=None, db_path=MEMORY_DB):
+    try:
+        logger.info("🔄 Starting episodic RAG update process.")
+        rag = EpisodicRAG(db_path=db_path)
+        chunks = await rag.custom_text_splitters(past_summery_date=past_summery_date)
+        if not chunks:
+            return
+        rag.index_creation(chunks)
+        logger.info("✅ Episodic RAG update process completed successfully.")
+    except Exception as e:
+        logger.error(f"Episodic RAG update failed: {e}")
 
 
 async def updation_knowledge_graph(

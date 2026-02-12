@@ -8,7 +8,7 @@ sys.path.insert(0, str(root_dir))
 
 from app_mcp.core.server_init import supervisor_server
 import app_mcp.tools.gsearch_tools
-import app_mcp.tools.knowledgegraph_tools
+import app_mcp.tools.rag_tools
 
 if __name__ == "__main__":
     supervisor_server.run()

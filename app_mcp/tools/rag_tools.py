@@ -1,4 +1,5 @@
 from rag.knowledge_graph import KnowledgeGraph
+from rag.episodic_rag import EpisodicRAG
 import sys
 from pathlib import Path
 import asyncio
@@ -10,6 +11,18 @@ import logging
 logger = setup_logger(__name__)
 
 _kg_instance = None
+_rag_instance = None
+
+
+def get_rag_instance():
+    global _rag_instance
+    if _rag_instance is None:
+        try:
+            _rag_instance = EpisodicRAG()
+        except Exception as e:
+            logger.error(f"Failed to initialize EpisodicRAG: {e}")
+            raise
+    return _rag_instance
 
 
 def get_kg_instance():
@@ -143,3 +156,22 @@ async def add_information_to_knowledge_graph(details: str):
     except Exception as e:
         logger.error(f"Error adding information to knowledge graph: {e}")
         return f"Error adding information to knowledge graph: {e}"
+
+
+@supervisor_server.tool()
+async def retrieve_relevant_chunks(query: str, top_k: int = 5, conditions: dict = None):
+    """
+    Retrieve relevant information chunks from the Episodic RAG system based on a query.
+
+    Args:
+        query: The search string or question used to find relevant chunks.
+        top_k: The number of top relevant chunks to retrieve.
+        conditions: Optional dictionary of additional conditions or filters to apply during retrieval.
+    """
+    try:
+        rag = get_rag_instance()
+        results = await asyncio.to_thread(rag.retrieve_chunks, query, top_k, conditions)
+        return results
+    except Exception as e:
+        logger.error(f"Error retrieving relevant chunks: {e}")
+        return f"Error retrieving relevant chunks: {e}"

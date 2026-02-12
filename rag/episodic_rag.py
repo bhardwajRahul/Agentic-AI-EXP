@@ -27,10 +27,9 @@ logger = setup_logger(__name__)
 
 
 class EpisodicRAG:
-    def __init__(self, past_summery_date=None, db_path=MEMORY_DB):
+    def __init__(self, db_path=MEMORY_DB):
         self.path = Path(db_path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.past_summery_date = past_summery_date
         self._model = None
 
     PREFIX_PATTERN = re.compile(
@@ -204,215 +203,231 @@ class EpisodicRAG:
             logger.error(f"Error generating embedding: {e}")
             return None
 
-    async def custom_text_splitters(self):
-        if not self.past_summery_date:
-            logger.warning("Past summary date is not set. No data will be retrieved.")
-            return []
-
-        query = """
-            SELECT timestamp, actor, message
-            FROM human_logs 
-            WHERE timestamp > ? 
-            AND actor != 'supervisor_routing' 
-            AND actor != 'summerizer_node'
-            ORDER BY timestamp ASC
-        """
-
-        async with aiosqlite.connect(self.path) as db:
-            async with db.execute(query, (self.past_summery_date,)) as cursor:
-                rows = await cursor.fetchall()
-                logger.info(f"Processing {len(rows)} raw logs...")
-
-        episodes = []
-        current_lines = []
-        current_start_ts = None
-        current_ts_obj = None
-        actors = set()
-
-        for timestamp, actor, message in rows:
-            try:
-                ts_obj = datetime.fromisoformat(timestamp)
-            except ValueError:
-                continue
-
-            if actor == "Human_node":
-                if current_lines:
-                    episodes.append(
-                        {
-                            "ts_obj": current_ts_obj,
-                            "timestamp": current_start_ts,
-                            "lines": current_lines,
-                            "actors": list(actors),
-                        }
-                    )
-                current_lines = [f"User: {message}"]
-                current_start_ts = timestamp
-                current_ts_obj = ts_obj
-                actors = set()
-
-            elif actor == "supervisor_task_response":
-                current_lines.append(f"Assistant: {message}")
-                actors.add("supervisor")
-                if current_lines:
-                    episodes.append(
-                        {
-                            "ts_obj": current_ts_obj,
-                            "timestamp": current_start_ts,
-                            "lines": current_lines,
-                            "actors": list(actors),
-                        }
-                    )
-                    current_lines = []
-                    current_start_ts = None
-                    actors = set()
-            else:
-                if current_lines:
-                    current_lines.append(f"{actor}: {message}")
-                    actors.add(actor)
-
-        if current_lines:
-            episodes.append(
-                {
-                    "ts_obj": current_ts_obj,
-                    "timestamp": current_start_ts,
-                    "lines": current_lines,
-                    "actors": list(actors),
-                }
-            )
-
-        final_chunks = []
-
-        for episode in episodes:
-            ep_text = "\n".join(episode["lines"])
-            ep_clean = self.clean_messages_for_chunk(ep_text)
-
-            current_actors = episode.get("actors")
-            if not current_actors:
-                current_actors = set("supervisor")
-
-            if not ep_clean:
-                continue
-
-            ep_tokens = count_tokens(ep_clean)
-            has_tool = any(
-                "__Tool Action__" in line or "Using tools" in line
-                for line in episode["lines"]
-            )
-
-            if ep_tokens < MIN_MESSAGE_TOKENS and not has_tool:
-                continue
-
-            elif (
-                ep_tokens < MIN_CHUNK_TOKENS
-            ):  # Why backward? Because a small follow-up usually relates to the previous big thought.
-                merged = False
-                last_chunk = None
-                if final_chunks:
-                    last_chunk = final_chunks[-1]
-
-                try:
-                    if last_chunk:
-                        last_ts = datetime.fromisoformat(
-                            last_chunk["metadata"]["timestamp"]
-                        )
-                        time_gap = (episode["ts_obj"] - last_ts).total_seconds()
-                    else:
-                        time_gap = 999999
-                except (ValueError, TypeError):
-                    time_gap = 999999
-
-                if time_gap < MAX_TIME_GAP_SECONDS and last_chunk:
-                    current_last_tokens = count_tokens(last_chunk["content"])
-
-                    if current_last_tokens + ep_tokens <= MAX_CHUNK_TOKENS:
-                        last_chunk["content"] += "\n" + ep_clean
-
-                        existing_actors = set(last_chunk["metadata"]["actors"])
-                        existing_actors.update(current_actors)
-                        last_chunk["metadata"]["actors"] = list(existing_actors)
-
-                        merged = True
-
-                if not merged:
-                    task_uuid = str(uuid.uuid4())
-                    final_chunks.append(
-                        {
-                            "id": str(uuid.uuid4()),
-                            "content": ep_clean,
-                            "embedding": None,
-                            "metadata": {
-                                "timestamp": episode["timestamp"],
-                                "task_id": task_uuid,
-                                "part": 1,
-                                "total_parts": 1,
-                                "actors": current_actors,
-                            },
-                        }
-                    )
-
-            else:
-                if ep_tokens > MAX_CHUNK_TOKENS:
-                    chunks = self._split_text_to_chunks(
-                        episode["lines"], episode["timestamp"], current_actors
-                    )
-                    final_chunks.extend(chunks)
-                else:
-                    task_uuid = str(uuid.uuid4())
-                    final_chunks.append(
-                        {
-                            "id": str(uuid.uuid4()),
-                            "content": ep_clean,
-                            "embedding": None,
-                            "metadata": {
-                                "timestamp": episode["timestamp"],
-                                "task_id": task_uuid,
-                                "part": 1,
-                                "total_parts": 1,
-                                "actors": current_actors,
-                            },
-                        }
-                    )
-
-        for i in range(len(final_chunks)):
-            final_chunks[i]["metadata"]["prev_id"] = None
-            final_chunks[i]["metadata"]["next_id"] = None
-            final_chunks[i]["embedding"] = self._embedding_chunk(
-                final_chunks[i]["content"]
-            )
-
-            try:
-                curr_ts = datetime.fromisoformat(
-                    final_chunks[i]["metadata"]["timestamp"]
+    async def custom_text_splitters(self, past_summary_date=None):
+        try:
+            if not past_summary_date:
+                logger.warning(
+                    "Past summary date is not set. No data will be retrieved."
                 )
-            except (ValueError, TypeError):
-                continue
+                return []
+            else:
+                past_summary_date = past_summary_date.isoformat()
 
-            if i > 0:
+            query = """
+                SELECT timestamp, actor, message
+                FROM human_logs 
+                WHERE timestamp > ? 
+                AND actor != 'supervisor_routing' 
+                AND actor != 'summerizer_node'
+                ORDER BY timestamp ASC
+            """
+
+            async with aiosqlite.connect(self.path) as db:
+                async with db.execute(query, (past_summary_date,)) as cursor:
+                    rows = await cursor.fetchall()
+                    logger.info(f"Processing {len(rows)} raw logs...")
+
+            if len(rows) < 5:
+                logger.warning(
+                    "Not enough new logs to process since the last summary date."
+                )
+                return []
+
+            episodes = []
+            current_lines = []
+            current_start_ts = None
+            current_ts_obj = None
+            actors = set()
+
+            for timestamp, actor, message in rows:
                 try:
-                    prev_ts = datetime.fromisoformat(
-                        final_chunks[i - 1]["metadata"]["timestamp"]
-                    )
-                    if (curr_ts - prev_ts).total_seconds() < MAX_TIME_GAP_SECONDS:
-                        final_chunks[i]["metadata"]["prev_id"] = final_chunks[i - 1][
-                            "id"
-                        ]
-                except (ValueError, TypeError):
-                    pass
+                    ts_obj = datetime.fromisoformat(timestamp)
+                except ValueError:
+                    continue
 
-            if i < len(final_chunks) - 1:
+                if actor == "Human_node":
+                    if current_lines:
+                        episodes.append(
+                            {
+                                "ts_obj": current_ts_obj,
+                                "timestamp": current_start_ts,
+                                "lines": current_lines,
+                                "actors": list(actors),
+                            }
+                        )
+                    current_lines = [f"User: {message}"]
+                    current_start_ts = timestamp
+                    current_ts_obj = ts_obj
+                    actors = set()
+
+                elif actor == "supervisor_task_response":
+                    current_lines.append(f"Assistant: {message}")
+                    actors.add("supervisor")
+                    if current_lines:
+                        episodes.append(
+                            {
+                                "ts_obj": current_ts_obj,
+                                "timestamp": current_start_ts,
+                                "lines": current_lines,
+                                "actors": list(actors),
+                            }
+                        )
+                        current_lines = []
+                        current_start_ts = None
+                        actors = set()
+                else:
+                    if current_lines:
+                        current_lines.append(f"{actor}: {message}")
+                        actors.add(actor)
+
+            if current_lines:
+                episodes.append(
+                    {
+                        "ts_obj": current_ts_obj,
+                        "timestamp": current_start_ts,
+                        "lines": current_lines,
+                        "actors": list(actors),
+                    }
+                )
+
+            final_chunks = []
+
+            for episode in episodes:
+                ep_text = "\n".join(episode["lines"])
+                ep_clean = self.clean_messages_for_chunk(ep_text)
+
+                current_actors = episode.get("actors")
+                if not current_actors:
+                    current_actors = set("supervisor")
+
+                if not ep_clean:
+                    continue
+
+                ep_tokens = count_tokens(ep_clean)
+                has_tool = any(
+                    "__Tool Action__" in line or "Using tools" in line
+                    for line in episode["lines"]
+                )
+
+                if ep_tokens < MIN_MESSAGE_TOKENS and not has_tool:
+                    continue
+
+                elif (
+                    ep_tokens < MIN_CHUNK_TOKENS
+                ):  # Why backward? Because a small follow-up usually relates to the previous big thought.
+                    merged = False
+                    last_chunk = None
+                    if final_chunks:
+                        last_chunk = final_chunks[-1]
+
+                    try:
+                        if last_chunk:
+                            last_ts = datetime.fromisoformat(
+                                last_chunk["metadata"]["timestamp"]
+                            )
+                            time_gap = (episode["ts_obj"] - last_ts).total_seconds()
+                        else:
+                            time_gap = 999999
+                    except (ValueError, TypeError):
+                        time_gap = 999999
+
+                    if time_gap < MAX_TIME_GAP_SECONDS and last_chunk:
+                        current_last_tokens = count_tokens(last_chunk["content"])
+
+                        if current_last_tokens + ep_tokens <= MAX_CHUNK_TOKENS:
+                            last_chunk["content"] += "\n" + ep_clean
+
+                            existing_actors = set(last_chunk["metadata"]["actors"])
+                            existing_actors.update(current_actors)
+                            last_chunk["metadata"]["actors"] = list(existing_actors)
+
+                            merged = True
+
+                    if not merged:
+                        task_uuid = str(uuid.uuid4())
+                        final_chunks.append(
+                            {
+                                "id": str(uuid.uuid4()),
+                                "content": ep_clean,
+                                "embedding": None,
+                                "metadata": {
+                                    "timestamp": episode["timestamp"],
+                                    "task_id": task_uuid,
+                                    "part": 1,
+                                    "total_parts": 1,
+                                    "actors": current_actors,
+                                },
+                            }
+                        )
+
+                else:
+                    if ep_tokens > MAX_CHUNK_TOKENS:
+                        chunks = self._split_text_to_chunks(
+                            episode["lines"], episode["timestamp"], current_actors
+                        )
+                        final_chunks.extend(chunks)
+                    else:
+                        task_uuid = str(uuid.uuid4())
+                        final_chunks.append(
+                            {
+                                "id": str(uuid.uuid4()),
+                                "content": ep_clean,
+                                "embedding": None,
+                                "metadata": {
+                                    "timestamp": episode["timestamp"],
+                                    "task_id": task_uuid,
+                                    "part": 1,
+                                    "total_parts": 1,
+                                    "actors": current_actors,
+                                },
+                            }
+                        )
+
+            for i in range(len(final_chunks)):
+                final_chunks[i]["metadata"]["prev_id"] = None
+                final_chunks[i]["metadata"]["next_id"] = None
+                final_chunks[i]["embedding"] = self._embedding_chunk(
+                    final_chunks[i]["content"]
+                )
+
                 try:
-                    next_ts = datetime.fromisoformat(
-                        final_chunks[i + 1]["metadata"]["timestamp"]
+                    curr_ts = datetime.fromisoformat(
+                        final_chunks[i]["metadata"]["timestamp"]
                     )
-                    if (next_ts - curr_ts).total_seconds() < MAX_TIME_GAP_SECONDS:
-                        final_chunks[i]["metadata"]["next_id"] = final_chunks[i + 1][
-                            "id"
-                        ]
                 except (ValueError, TypeError):
-                    pass
+                    continue
 
-        logger.info(f"Chunking Complete. Generated {len(final_chunks)} linked chunks.")
-        return final_chunks
+                if i > 0:
+                    try:
+                        prev_ts = datetime.fromisoformat(
+                            final_chunks[i - 1]["metadata"]["timestamp"]
+                        )
+                        if (curr_ts - prev_ts).total_seconds() < MAX_TIME_GAP_SECONDS:
+                            final_chunks[i]["metadata"]["prev_id"] = final_chunks[
+                                i - 1
+                            ]["id"]
+                    except (ValueError, TypeError):
+                        pass
+
+                if i < len(final_chunks) - 1:
+                    try:
+                        next_ts = datetime.fromisoformat(
+                            final_chunks[i + 1]["metadata"]["timestamp"]
+                        )
+                        if (next_ts - curr_ts).total_seconds() < MAX_TIME_GAP_SECONDS:
+                            final_chunks[i]["metadata"]["next_id"] = final_chunks[
+                                i + 1
+                            ]["id"]
+                    except (ValueError, TypeError):
+                        pass
+
+            logger.info(
+                f"Chunking Complete. Generated {len(final_chunks)} linked chunks."
+            )
+            return final_chunks
+        except Exception as e:
+            logger.error(f"Error during custom text splitting: {e}")
+            return []
 
     def index_creation(self, final_chunks):
         try:
