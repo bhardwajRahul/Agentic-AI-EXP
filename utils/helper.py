@@ -158,5 +158,25 @@ def format_tool_to_text(tool_name, tool_args_str):
     return f"__Tool Action__: Used {tool_name} with inputs: {arg_summary}"
 
 
+def clean_text_for_tts(text):
+    # 1. Remove code blocks (content between triple backticks)
+    text = re.sub(r'```.*?```', ' ', text, flags=re.DOTALL)
+    
+    # 2. Remove inline code (content between single backticks)
+    text = re.sub(r'`.*?`', ' ', text)
+    
+    # 3. Remove Markdown formatting (*, **, #, >, etc.)
+    text = re.sub(r'[\*\#_>~\-]{2,}', '', text) # Remove multi-char markers like **, ##, --
+    text = re.sub(r'(?<!\w)\*|\*(?!\w)', '', text) # Remove single * if it's not part of a math equation
+    
+    # 4. Remove Links [Text](URL) -> Text
+    text = re.sub(r'\[([^\]]+)\]\([^\)]+\)', r'\1', text)
+    
+    # 5. Clean up extra whitespace created by removals
+    text = re.sub(r'\s+', ' ', text).strip()
+    
+    return text
+
+
 if __name__ == "__main__":
     asyncio.run(get_agent_state(DEFAULT_THREAD_ID))

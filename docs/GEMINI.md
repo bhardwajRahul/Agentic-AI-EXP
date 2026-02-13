@@ -48,9 +48,12 @@ This feature is used for batch operations, multi-step deterministic flows, and p
 
 The "brains" of the agents are not hard-coded but are defined in system prompts within `config/prompts.py`. These prompts instruct the agents on their roles, capabilities, and how to make decisions. The `SUPERVISOR_SYSTEM_PROMPT` is especially critical, as it contains the logic for routing tasks to the other agents.
 
-### Knowledge Graph
+### Retrieval-Augmented Generation (RAG)
 
-The system builds and maintains a knowledge graph (`rag/knowledge_graph.py`) to create a long-term memory. It extracts entities (people, projects, organizations, etc.) and their relationships from conversations, storing them in a graph database. This allows the agent to recall information from past interactions.
+The system employs a sophisticated RAG mechanism, comprising both a Knowledge Graph and Episodic Memory, to enhance its understanding and recall.
+
+*   **Knowledge Graph (`rag/knowledge_graph.py`):** This component builds and maintains a long-term memory by extracting entities (people, projects, organizations, etc.) and their relationships from conversations. This information is stored in a graph database, enabling the agent to recall static facts and relationships from past interactions.
+*   **Episodic Memory (`rag/episodic_rag.py`):** This system provides a dynamic, conversational memory by processing interaction logs (e.g., from `MEMORY_DB`). It cleans and chunks messages, generates embeddings using models like `gte-modernbert-base`, and stores them in a Qdrant vector database. This allows the agent to retrieve relevant conversational context, reconstruct multi-part tasks, and expand context for a more coherent understanding of ongoing dialogues.
 
 ## System Architecture
 
@@ -89,6 +92,7 @@ This directory contains the implementation of the agent servers.
 ### `rag/` (Retrieval-Augmented Generation)
 
 *   **`knowledge_graph.py`:** Implements the logic for extracting entities and relationships from text, validating them, and adding them to the knowledge graph.
+*   **`episodic_rag.py`:** Manages the episodic memory, processing interaction logs into retrievable chunks using embeddings and a Qdrant vector database.
 
 ## Request Execution Flow
 
