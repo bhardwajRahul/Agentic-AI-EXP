@@ -1,22 +1,25 @@
-import os
 import collections
 import threading
 import time
 import queue
+import sys
+from pathlib import Path
+from datetime import datetime
+
 import numpy as np
 import sounddevice as sd
-from pathlib import Path
 from faster_whisper import WhisperModel
 from piper.voice import PiperVoice
 from openwakeword import Model
-import sys
 
 root = Path(__file__).resolve().parent.parent
 sys.path.append(str(root))
 
 from utils.helper import clean_text_for_tts
+from config.settings import WAKE_WORD, WW_THRESHOLD, SILENCE_THRESHOLD
+from utils.helper import setup_logger
 
-WAKE_WORD = "hey_jarvis"
+logger = setup_logger(__name__)
 
 
 class VoiceInference:
@@ -36,6 +39,7 @@ class VoiceInference:
         self.ring_buffer = collections.deque(maxlen=32000)
         self.is_speaking = False
         self.stop_speaking_event = threading.Event()
+        self.last_ww_call = None
 
         self.sample_rate = 16000
         self.chunk_size = 1280
@@ -43,7 +47,6 @@ class VoiceInference:
     @property
     def stt_model(self):
         if self._stt_model is None:
-            print("Loading STT model...")
             self._stt_model = WhisperModel(
                 "base.en",
                 device="cpu",
@@ -55,7 +58,6 @@ class VoiceInference:
     @property
     def tts_voice(self):
         if self._tts_voice is None:
-            print("Loading TTS model...")
             self._tts_voice = PiperVoice.load(self.tts_model_path)
         return self._tts_voice
 
@@ -65,7 +67,7 @@ class VoiceInference:
             self._oww = Model(wakeword_models=[WAKE_WORD], inference_framework="onnx")
         return self._oww
 
-    def listen_continuous(self):
+    def wait_for_wake_word(self):
 
         audio_queue = queue.Queue()
 
@@ -79,31 +81,35 @@ class VoiceInference:
             blocksize=self.chunk_size,
             callback=audio_callback,
         ):
-            print("Listening for wake word...")
             while True:
-                chunk_bytes = audio_queue.get()
-                chunk_int16 = np.frombuffer(chunk_bytes, dtype=np.int16)
+                chunk_int16 = np.frombuffer(audio_queue.get(), dtype=np.int16)
 
                 self.ring_buffer.extend(chunk_int16)
 
                 prediction = self.wake_model.predict(chunk_int16)
 
-                if prediction[WAKE_WORD] > 0.5:
-                    print("Wake word detected!")
+                if prediction[WAKE_WORD] > WW_THRESHOLD:
+                    self.last_ww_call = datetime.now()
 
                     if self.is_speaking:
                         self.stop_speaking_event.set()
-                        time.sleep(0.2)
+                        # Wait for speech to finish before recording
+                        time.sleep(0.5)
 
-                    pre_trigger_audio = list(self.ring_buffer)
-                    return self._record_command(pre_trigger_audio)
+                    return self._record_command(list(self.ring_buffer))
+
+    def listen(self):
+        return self._record_command([])
 
     def _record_command(self, pre_trigger_audio):
         """Records until silence, effectively stripping the wake word logic."""
-        print("🎤 Recording command...")
         command_audio = [np.array(pre_trigger_audio, dtype=np.int16)]
         silent_chunks = 0
-        silence_limit = int(2 * self.sample_rate / 1024)
+        silence_limit = int(
+            2 * self.sample_rate / self.chunk_size
+        )  # 2 seconds of silence
+
+        is_user_speaking = False
 
         with sd.InputStream(
             samplerate=self.sample_rate,
@@ -119,12 +125,12 @@ class VoiceInference:
                 chunk_float = chunk.astype(np.float32) / 32768.0
                 rms = np.sqrt(np.mean(chunk_float**2))
 
-                if rms < 0.01:
+                if rms > SILENCE_THRESHOLD:
+                    is_user_speaking = True
+                elif is_user_speaking:
                     silent_chunks += 1
                     if silent_chunks > silence_limit:
                         break
-                else:
-                    silent_chunks = 0
 
         data = np.concatenate(command_audio)
         data = data.astype(np.float32) / 32768.0
@@ -132,7 +138,7 @@ class VoiceInference:
         text = " ".join(s.text for s in segments).strip()
 
         clean_text = clean_text_for_tts(text)
-        print(f"📝 Heard: {clean_text}")
+
         return clean_text
 
     def speak(self, text):
@@ -150,7 +156,6 @@ class VoiceInference:
 
         for audio_chunk in self.tts_voice.synthesize(text):
             if self.stop_speaking_event.is_set():
-                print("Stopping speech...")
                 break
             stream.write(audio_chunk.audio_int16_array)
 
