@@ -6,25 +6,49 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 
 from config.settings import (
     CHECKPOINT_DB,
-    communication_config,
     DEFAULT_THREAD_ID,
-    planning_config,
+    communication_config,
     content_config,
+    planning_config,
     supervisor_config,
 )
-
-from core.voice_inference import VoiceInference
 from core.graph import build_graph
+from core.voice_inference import VoiceInference
+from utils.helper import (
+    AsyncSqliteSaver,
+    clean_text_for_tts,
+    request_counter,
+    setup_logger,
+)
 from utils.memory_manager import log_event
-from utils.helper import AsyncSqliteSaver, clean_text_for_tts
-from utils.helper import request_counter, setup_logger
 
 logger = setup_logger(__name__)
 
 
+async def keyword_listener(queue, loop):
+    while True:
+        try:
+            user_input = await loop.run_in_executor(None, input)
+            if user_input.strip():
+                await queue.put(("TEXT", user_input.strip()))
+        except EOFError:
+            break
+
+
+async def voice_listener(queue, voice_agent, loop):
+    while True:
+        try:
+            text = await loop.run_in_executor(None, voice_agent.listen_continuous)
+            if text.strip():
+                await queue.put(("VOICE", text.strip()))
+        except Exception as e:
+            logger.error(f"Error in voice listener: {e}")
+            await asyncio.sleep(1)  # Avoid tight loop on error
+
+
 async def main():
     start_time = datetime.now()
-    logger.info("🚀 Starting Multi-Server Agent")
+    logger.info("🚀 Starting Agent")
     logger.info("=" * 80)
 
     try:
@@ -67,59 +91,49 @@ async def main():
 
             voice = VoiceInference()
 
-            while True:
-                mode = input("Press Enter to type, or 'v' to speak: ")
-                is_voice_mode = False
-                if mode.lower() == "v":
-                    user_query = voice.listen().strip()
-                    is_voice_mode = True
-                else:
-                    user_query = input("User: ").strip()
+            event_queue = asyncio.Queue()
+            loop = asyncio.get_running_loop()
 
-                if user_query.lower() in ["exit", "quit", "bye"]:
-                    logger.info("👋 User ended conversation")
+            # Start listeners
+            asyncio.create_task(keyword_listener(event_queue, loop))
+            asyncio.create_task(voice_listener(event_queue, voice, loop))
+
+            print("\n✅ SYSTEM READY.")
+            print("   - Type anytime and press Enter.")
+            print(f"   - Or say '{voice.WAKE_WORD_MODEL}' followed by command.\n")
+
+            while True:
+                source, query = await event_queue.get()
+
+                if query.lower() in ["exit", "quit"]:
+                    print("👋 Bye!")
                     break
 
-                if not user_query:
-                    continue
-
-                logger.info("\n")
-                logger.info(f"👤 User Query: {user_query}")
+                print(f"\n👤 User ({source}): {query}")
 
                 try:
                     await log_event(
                         thread_id=DEFAULT_THREAD_ID,
                         actor="Human_node",
-                        message=user_query,
+                        message=query,
                         metadata={},
                     )
                 except Exception as e:
                     logger.error(f"Failed to log human_node audit event: {e}")
 
                 state = await graph.ainvoke(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": user_query,
-                            }
-                        ]
-                    },
+                    {"messages": [{"role": "user", "content": query}]},
                     config=config,
                 )
 
-                last_message = state["messages"][-1]
+                last_msg = state["messages"][-1]
+                if last_msg.type == "ai" and last_msg.content:
+                    final_response = last_msg.content
+                    print(f"\n🤖 Gemini: {final_response}\n")
 
-                logger.info(f"last message: {last_message} type: {type(last_message)}")
-
-                if last_message.type == "ai" and last_message.content:
-                    final_response = last_message.content
-
-                    print(f"\n🤖 Assitant: {final_response}\n")
-
-                    if is_voice_mode:
-                        clean_response = clean_text_for_tts(final_response)
-                        voice.speak(clean_response)
+                    if source == "VOICE":
+                        clean_resp = clean_text_for_tts(final_response)
+                        await loop.run_in_executor(None, voice.speak, clean_resp)
 
             logger.info("=" * 80)
             logger.info("🎯 EXECUTION SUMMARY")
