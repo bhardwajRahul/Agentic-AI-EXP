@@ -133,3 +133,4 @@ A user request is processed as follows:
         python main.py
         ```
 This will start the interactive CLI.
+yet to add STT and TTS but with buffer and wake words
