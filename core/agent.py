@@ -6,6 +6,7 @@ from langchain_core.messages import (
     SystemMessage,
     trim_messages,
     RemoveMessage,
+    HumanMessage,
 )
 
 import aiosqlite
@@ -56,14 +57,41 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 
         logger.info(f"📨 Messages in conversation: {len(state['messages'])}")
 
-        last_messages = trim_messages(  # fallback if summerizer fails
-            state["messages"],
-            max_tokens=30000,
-            strategy="last",
-            token_counter=count_tokens,
-            include_system=True,
-            start_on="human",
-        )
+        messages = state["messages"]
+        filtered_messages = []
+        routing_found = False
+
+        for msg in reversed(messages):
+            if (
+                getattr(msg, "name", "") == "supervisor"
+                and isinstance(msg, AIMessage)
+                and msg.additional_kwargs("routed_to") == current_agent_name
+            ):
+                instruction_msg = HumanMessage(
+                    f"Assigned Task from supervisor:\n{msg.content}"
+                )
+                filtered_messages.insert(0, instruction_msg)
+                routing_found = True
+                break
+            else:
+                filtered_messages.insert(0, msg)
+
+        if not routing_found:
+            last_messages = trim_messages(
+                messages,
+                max_tokens=30000,
+                strategy="last",
+                token_counter=count_tokens,
+                include_system=True,
+                start_on="human",
+            )
+            summary = state.get("summary", None)
+            if summary:
+                logger.info("📝 Including global summary in the prompt.")
+                summary_msg = SystemMessage(content=f"Conversation Summary:\n{summary}")
+                last_messages = [summary_msg] + last_messages
+        else:
+            last_messages = filtered_messages
 
         logger.info("=" * 80)
         if last_messages:  # this is for logs purpose only
@@ -74,14 +102,6 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
         logger.info("=" * 80)
 
         try:
-            summary = state.get("summary", None)
-            if summary:
-                logger.info("📝 Including conversation summary in the prompt.")
-                summary_msg = SystemMessage(
-                    content=f"Conversation Summary of previous messages:\n{summary}"
-                )
-                last_messages = [summary_msg] + last_messages
-
             messages = [SystemMessage(content=system_prompt)] + last_messages
             logger.info(
                 f"🤖 Sending messages to LLM with {count_tokens(messages)} tokens"
@@ -183,22 +203,41 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
         current_time = get_current_time()  # system prompt should have this need to do
         current_agent_name = agent_name
 
-        last_messages = trim_messages(
-            state["messages"],
-            max_tokens=30000,
-            strategy="last",
-            token_counter=count_tokens,
-            include_system=True,
-            start_on="human",
-        )
+        messages = state["messages"]
+        filtered_messages = []
+        routing_found = False
 
-        summary = state.get("summary", None)
-        if summary:
-            logger.info("📝 Including conversation summary in the prompt.")
-            summary_msg = SystemMessage(
-                content=f"Conversation Summary of previous messages:\n{summary}"
+        for msg in reversed(messages):
+            if (
+                getattr(msg, "name", "") == "supervisor"
+                and isinstance(msg, AIMessage)
+                and msg.additional_kwargs("routed_to") == current_agent_name
+            ):
+                instruction_msg = HumanMessage(
+                    f"Assigned Task from supervisor:\n{msg.content}"
+                )
+                filtered_messages.insert(0, instruction_msg)
+                routing_found = True
+                break
+            else:
+                filtered_messages.insert(0, msg)
+
+        if not routing_found:
+            last_messages = trim_messages(
+                messages,
+                max_tokens=30000,
+                strategy="last",
+                token_counter=count_tokens,
+                include_system=True,
+                start_on="human",
             )
-            last_messages = [summary_msg] + last_messages
+            summary = state.get("summary", None)
+            if summary:
+                logger.info("📝 Including global summary in the prompt.")
+                summary_msg = SystemMessage(content=f"Conversation Summary:\n{summary}")
+                last_messages = [summary_msg] + last_messages
+        else:
+            last_messages = filtered_messages
 
         try:
             agent = CodeExecutionAgent(llm, tool_sets)

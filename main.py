@@ -54,7 +54,12 @@ async def voice_listener(queue, voice_agent, loop, agent_state):
             if not is_session_active:
                 text = await loop.run_in_executor(None, voice_agent.wait_for_wake_word)
             else:
-                text = await loop.run_in_executor(None, voice_agent.listen)
+                try:
+                    text = await loop.run_in_executor(
+                        None, voice_agent.listen, timeout=SESSION_TIMEOUT - time_since
+                    )
+                except TimeoutError:
+                    continue
 
             if text.strip():
                 agent_state["last_interaction"] = time.time()
