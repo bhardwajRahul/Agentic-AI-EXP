@@ -1,10 +1,23 @@
-OPENROUTER_API_KEY= ***
+# Controls which environment the system runs in: stateful (local) or stateless (cloud).
+
+DOCKER_ENV=false
 STATELESS_MODE=false
 TRANSPORT_MODE=stdio
-DOCKER_ENV=false
 indicators=[]
+
+# Defines the active chat thread when running via terminal (main.py). Change this to start a new conversation. In the UI this is handled automatically.
+
+DEFAULT_THREAD_ID=4
+
+# These two are required for Google search API (Programmable Search Engine) availability.
+
 GOOGLE_PSE_API_KEY= ***
 GOOGLE_PSE_ENGINE_ID= ***
-DEFAULT_THREAD_ID=4
-GROQ_API_KEY= ***
 
+# LLM provider keys. OpenRouter is the primary provider and performs best.
+# Groq and HuggingFace are kept for basic system checks and debugging only.
+# Do not evaluate system performance using those two. The main model is 20B parameters.
+
+OPENROUTER_API_KEY= ***
+GROQ_API_KEY= ***   
+HF_TOKEN= ***

@@ -1,5 +1,6 @@
 """
 OAuth configuration and stateless mode detection.
+only if u move to cloud or docker, otherwise we are in stateful mode by default.
 
 Stateless mode is enabled when:
 1. Environment variable STATELESS_MODE=true
