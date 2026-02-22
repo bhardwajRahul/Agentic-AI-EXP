@@ -3,18 +3,11 @@ import aiosqlite
 from datetime import datetime
 import sqlite3
 
-import sys
-from pathlib import Path
-
 import msgpack
 import pickle
 from msgpack import ExtType
 import json
 import re
-
-
-root_dir = Path(__file__).parent.parent
-sys.path.insert(0, str(root_dir))
 
 from config.settings import MEMORY_DB, CHECKPOINT_DB
 from utils.helper import count_tokens, setup_logger

@@ -155,10 +155,12 @@ async def main():
                 except Exception as e:
                     logger.error(f"Failed to log human_node audit event: {e}")
 
+                request_counter.start_turn(query)
                 state = await graph.ainvoke(
                     {"messages": [{"role": "user", "content": query}]},
                     config=config,
                 )
+                request_counter.end_turn()
 
                 last_msg = state["messages"][-1]
                 if last_msg.type == "ai" and last_msg.content:
@@ -176,7 +178,7 @@ async def main():
             execution_time = (end_time - start_time).total_seconds()
             logger.info(
                 f"🎯 Session complete | "
-                f"LLM requests: {request_counter['supervisor'] + request_counter['sub_agents']} | "
+                f"LLM requests: {request_counter.session_total()} | "
                 f"Messages: {len(state['messages'])} | "
                 f"Time: {execution_time:.2f}s"
             )

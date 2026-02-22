@@ -2,7 +2,6 @@ import collections
 import threading
 import time
 import queue
-import sys
 from pathlib import Path
 from datetime import datetime
 
@@ -12,8 +11,6 @@ from faster_whisper import WhisperModel
 from piper.voice import PiperVoice
 from openwakeword import Model
 
-root = Path(__file__).resolve().parent.parent
-sys.path.append(str(root))
 
 from utils.helper import clean_text_for_tts
 from config.settings import WAKE_WORD, WW_THRESHOLD, SILENCE_THRESHOLD
@@ -29,6 +26,7 @@ class VoiceInference:
         stt_model_path="./models/stt",
     ):
 
+        root = Path(__file__).resolve().parent.parent
         self.tts_model_path = str(root / tts_model_path)
         self.stt_model_path = str(root / stt_model_path)
 

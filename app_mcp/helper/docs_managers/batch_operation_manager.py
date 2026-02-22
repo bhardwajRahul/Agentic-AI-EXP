@@ -7,8 +7,6 @@ extracting complex validation and request building logic.
 
 import asyncio
 from typing import Any, Union, Dict, List, Tuple
-import sys
-from pathlib import Path
 
 
 from app_mcp.helper.docs_helper import (
@@ -23,10 +21,6 @@ from app_mcp.helper.docs_helper import (
 from utils.helper import setup_logger
 
 logger = setup_logger(__name__)
-
-
-root_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(root_dir))
 
 
 class BatchOperationManager:

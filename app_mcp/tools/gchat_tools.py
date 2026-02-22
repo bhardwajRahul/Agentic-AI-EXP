@@ -6,8 +6,6 @@ This module provides MCP tools for interacting with Google Chat API.
 
 import asyncio
 from typing import Optional
-import sys
-from pathlib import Path
 
 from googleapiclient.errors import HttpError
 
@@ -26,10 +24,6 @@ from app_mcp.helper.pydantic_models import (
     SearchMessagesResponse,
     SearchMessageInfo,
 )
-
-root_dir = Path(__file__).parent.parent.parent
-sys.path.insert(0, str(root_dir))
-
 
 from utils.helper import setup_logger
 

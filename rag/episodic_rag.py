@@ -1,7 +1,6 @@
 import uuid
 import re
 import aiosqlite
-import sys
 from pathlib import Path
 from datetime import datetime
 from sentence_transformers import SentenceTransformer
@@ -16,9 +15,6 @@ MAX_CHUNK_TOKENS = (
     1000  # this threshold need to optimize based on performance now done heeeee
 )
 MAX_TIME_GAP_SECONDS = 3600
-
-root_dir = Path(__file__).parent.parent
-sys.path.append(str(root_dir))
 
 from config.settings import EMBEDDING_GTE_MODEL_PATH, MEMORY_DB, EPISODIC_RAG_DB
 from utils.helper import setup_logger, count_tokens

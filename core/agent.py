@@ -11,15 +11,10 @@ from langchain_core.messages import (
 
 import aiosqlite
 from datetime import datetime
-import sys
 import re
-from pathlib import Path
 import time
 
 from rag.episodic_rag import EpisodicRAG
-
-root = Path(__file__).parent.parent
-sys.path.append(str(root))
 
 from config.settings import MEMORY_DB, DEFAULT_THREAD_ID
 from config.prompts import VOICE_INTERACTION_PROMPT
@@ -266,8 +261,8 @@ def supervisor_node_factory(
 def sub_supervisor_node_factory(llm, system_prompt, agent_name="content_supervisor"):
     async def sub_supervisor_node(state: State):
         current_agent_name = agent_name
-        request_counter["sub_agents"] += 1
-        request_num = request_counter["sub_agents"]
+        request_counter[current_agent_name] += 1
+        request_num = request_counter[current_agent_name]
 
         current_time = get_current_time()
 
@@ -426,14 +421,14 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
     async def agent_node(state: State):
 
         current_agent_name = agent_name
-        request_counter["sub_agents"] += 1
-        request_num = request_counter["sub_agents"]
+        request_counter[current_agent_name] += 1
+        request_num = request_counter[current_agent_name]
 
         current_time = get_current_time()
 
         logger.info("\n")
         logger.info("=" * 80)
-        logger.info(f"🔄 LLM REQUEST #{request_num}")
+        logger.info(f"🔄 {current_agent_name.upper()} REQUEST #{request_num}")
         logger.info("=" * 80)
 
         messages = state["messages"]

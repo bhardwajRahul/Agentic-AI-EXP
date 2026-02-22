@@ -13,9 +13,6 @@ import matplotlib.pyplot as plt
 from pydantic import BaseModel, Field
 from typing import List, Literal
 
-
-root = Path(__file__).parent.parent
-sys.path.append(str(root))
 from config.prompts import (
     KNOWLEDGE_GRAPH_EXTRACTION_PROMPT,
     KNOWLEDGE_GRAPH_VALIDATION_PROMPT,
