@@ -1,39 +1,33 @@
-import json
-import httpx
 import asyncio
-from langchain_core.messages import (
-    AIMessage,
-    SystemMessage,
-    trim_messages,
-    RemoveMessage,
-    HumanMessage,
-)
-
-import aiosqlite
-from datetime import datetime
+import json
 import re
 import time
+from datetime import datetime
 
-from rag.episodic_rag import EpisodicRAG
+import aiosqlite
+import httpx
+from langchain_core.messages import (
+    AIMessage,
+    HumanMessage,
+    RemoveMessage,
+    SystemMessage,
+    trim_messages,
+)
 
-from config.settings import MEMORY_DB, DEFAULT_THREAD_ID
-from config.prompts import VOICE_INTERACTION_PROMPT
-from utils.memory_manager import log_event
-
-
+from config.prompts import HISTORY_SUMMARIZE_PROMPT, VOICE_INTERACTION_PROMPT
+from config.settings import DEFAULT_THREAD_ID, MEMORY_DB
+from core.codeagent import CodeExecutionAgent
+from core.llm import build_llm
 from core.state import State
-from utils.memory_manager import sanitize_history
+from rag.episodic_rag import EpisodicRAG
 from utils.helper import (
+    count_tokens,
+    format_tool_to_text,
+    get_current_time,
     request_counter,
     setup_logger,
-    count_tokens,
-    get_current_time,
-    format_tool_to_text,
 )
-from config.prompts import HISTORY_SUMMARIZE_PROMPT
-from core.llm import build_llm
-from core.codeagent import CodeExecutionAgent
-
+from utils.memory_manager import log_event, sanitize_history
 
 logger = setup_logger(__name__)
 
@@ -43,6 +37,12 @@ def supervisor_node_factory(
     system_prompt,
     agent_name="supervisor",
 ):
+    """Create the supervisor graph node that routes work or responds directly.
+
+    The returned async node invokes the supervisor LLM, handles tool calls,
+    parses JSON routing output, and falls back to direct user replies.
+    """
+
     async def supervisor_node(state: State):
         request_counter[agent_name] += 1
         request_num = request_counter[agent_name]
@@ -259,6 +259,12 @@ def supervisor_node_factory(
 
 
 def sub_supervisor_node_factory(llm, system_prompt, agent_name="content_supervisor"):
+    """Create the content sub-supervisor node used for internal content routing.
+
+    The returned node reads supervisor instructions, calls the sub-supervisor
+    LLM, and emits routing decisions for document/data/presentation agents.
+    """
+
     async def sub_supervisor_node(state: State):
         current_agent_name = agent_name
         request_counter[current_agent_name] += 1
@@ -418,6 +424,12 @@ def sub_supervisor_node_factory(llm, system_prompt, agent_name="content_supervis
 
 
 def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
+    """Create a specialized worker-agent node.
+
+    The returned node consumes routed instructions, invokes the worker LLM with
+    tools, logs outputs, and emits messages back into the graph.
+    """
+
     async def agent_node(state: State):
 
         current_agent_name = agent_name
@@ -603,7 +615,10 @@ def agent_node_factory(llm_with_tools, system_prompt, agent_name: str):
 
 
 def code_execution_factory(llm, tool_sets, agent_name: str):
+    """Create the code execution node that runs CodeExecutionAgent workflows."""
+
     async def code_executor(state: State):
+        """Execute one code-agent turn and return summarized execution output."""
         current_time = get_current_time()  # system prompt should have this need to do
         current_agent_name = agent_name
 
@@ -706,6 +721,7 @@ def code_execution_factory(llm, tool_sets, agent_name: str):
 
 
 async def summerizer_node(state: State):
+    """Condense long chat history into a compact summary and prune old messages."""
     logger.info("📝 Summarizer node activated to condense conversation history.")
 
     messages = state["messages"]
@@ -775,11 +791,16 @@ async def summerizer_node(state: State):
 
 
 def memory_node_factory():
-    async def memory_node(state: State):
-        from core.agent import updation_knowledge_graph
-        from core.agent import updation_episodic_rag
+    """Create the memory maintenance node.
 
+    The returned node updates long-term memory systems (knowledge graph and
+    episodic RAG) and refreshes memory-related timestamps in graph state.
+    """
+
+    async def memory_node(state: State):
+        """Run memory update pipelines and return state update fields."""
         from config.settings import DEFAULT_THREAD_ID, MEMORY_DB
+        from core.agent import updation_episodic_rag, updation_knowledge_graph
 
         now_float = time.time()
 
@@ -804,6 +825,7 @@ def memory_node_factory():
 
 
 async def updation_episodic_rag(past_summary_date=None, db_path=MEMORY_DB):
+    """Update episodic RAG index from memory logs after a given timestamp."""
     try:
         logger.info("🔄 Starting episodic RAG update process.")
 
@@ -841,6 +863,7 @@ async def updation_episodic_rag(past_summary_date=None, db_path=MEMORY_DB):
 async def updation_knowledge_graph(
     state: State, thread_id: str, db_path: str = MEMORY_DB
 ):
+    """Extract new facts from logs and apply create/update ops to knowledge graph."""
     try:
         from rag.knowledge_graph import KnowledgeGraph
 

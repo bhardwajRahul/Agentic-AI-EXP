@@ -22,7 +22,7 @@ def _get_provider_config(model: str = None):
         return GROQ_API_KEY, GROQ_BASE_URL, model or DEFAULT_GROQ_MODEL
     if LLM_PROVIDER == "huggingface":
         return HF_API_KEY, HF_BASE_URL, model or DEFAULT_HF_MODEL
-    # default: openrouter
+    # default: openrouter use other 2 for testing the sucess of fallback mechanism not performance they are shit
     return OPENROUTER_API_KEY, OPENROUTER_BASE_URL, model or DEFAULT_OPEN_MODEL
 
 

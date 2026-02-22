@@ -12,6 +12,7 @@ logger = setup_logger(__name__)
 
 class CodeExecutionAgent:
     def __init__(self, llm_client, tool_sets: Dict[str, Any]):
+        """Initialize code agent with LLM client, tool registry, and sandbox path."""
         self.llm = llm_client
         self.tool_sets = tool_sets
         self.sandbox_path = Path("D:/Agentic AI/core/sandbox")

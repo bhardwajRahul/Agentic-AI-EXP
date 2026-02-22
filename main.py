@@ -131,7 +131,7 @@ async def main():
                     voice_listener(event_queue, voice, loop, agent_state)
                 )
 
-            logger.info(f"🎤 Say Hey J.A.R.V.I.S or type your message")
+            logger.info("🎤 Say Hey J.A.R.V.I.S or type your message")
             logger.info("💡 Type 'exit' or 'quit' to stop\n")
 
             while True:
